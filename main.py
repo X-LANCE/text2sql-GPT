@@ -4,7 +4,7 @@ import pickle
 import random
 import time
 from eval.evaluation import isValidSQL
-from sentence_transformers import util
+from sentence_transformers import SentenceTransformer, util
 from util.arg import main_args
 from util.encode import encode_dataset
 from util.example import Example
@@ -35,7 +35,7 @@ def get_static_shots(dataset, prompt, args):
 def get_dynamic_shots(encoding, dataset, prompt, args):
     if args.zero_shot or args.dynamic_num == 0:
         return []
-    scores = util.cos_sim(encoding, [example['encoding'] for example in dataset]).squeeze(0).tolist()
+    scores = util.cos_sim(encoding, [example[args.encoding + '_encoding'] for example in dataset]).squeeze(0).tolist()
     scores = sorted(enumerate(scores), key=lambda x: -x[1])
     shots = []
     for item in scores:
@@ -47,14 +47,38 @@ def get_dynamic_shots(encoding, dataset, prompt, args):
     return shots
 
 
-def postprocess(sql):
-    return 'SELECT ' + ' '.join(sql.replace('==', '=').replace('<>', '!=').split())
+def get_response(prompt):
+    while 1:
+        try:
+            response = openai.Completion.create(
+                model='code-davinci-002',
+                prompt=prompt,
+                max_tokens=150,
+                temperature=0,
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0,
+                stop=[';', '\n\n', 'Given', 'Translate']
+            )
+            return response['choices'][0]['text']
+        except:
+            print('Retrying ...')
+            time.sleep(10)
+
+
+def postprocess(sql, db_id):
+    sql = original_sql = 'SELECT ' + ' '.join(sql.replace('==', '=').replace('<>', '!=').split())
+    while sql != 'SELECT' and not isValidSQL(sql, f'data/database/{db_id}/{db_id}.sqlite'):
+        sql = ' '.join(sql.split()[:-1])
+    return original_sql if sql == 'SELECT' else sql
 
 
 def decode(train_dataset, dev_dataset, args, etype='all'):
     openai.api_key = os.getenv('OPENAI_API_KEY')
     prompt = Prompt(args=args)
     static_shots = get_static_shots(train_dataset, prompt, args)
+    if args.encoding == 'query':
+        sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
     pred_filename = os.path.join(args.log_path, 'pred.sql')
@@ -70,27 +94,23 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         if i < cached:
             continue
         db_id = example['db_id']
-        dynamic_shots = get_dynamic_shots(example['encoding'], train_dataset, prompt, args)
-        while 1:
-            try:
-                response = openai.Completion.create(
-                    model='code-davinci-002',
-                    prompt=prompt.get_prompt(db_id, example['question'], static_shots + dynamic_shots),
-                    max_tokens=150,
-                    temperature=0,
-                    top_p=1,
-                    frequency_penalty=0,
-                    presence_penalty=0,
-                    stop=[';', '\n\n', 'Given', 'Translate']
-                )
-                break
-            except:
-                print('Retrying ...')
-                time.sleep(3)
-        sql = postprocess(response['choices'][0]['text'])
-        while sql != 'SELECT' and not isValidSQL(sql, f'data/database/{db_id}/{db_id}.sqlite'):
-            sql = ' '.join(sql.split()[:-1])
-        file.write(sql + '\n')
+        question = example['question']
+        if args.encoding == 'question':
+            dynamic_shots = get_dynamic_shots(example['question_encoding'], train_dataset, prompt, args)
+            response = get_response(prompt.get_prompt(db_id, question, static_shots + dynamic_shots))
+        else:
+            response = get_response(prompt.get_prompt(db_id, question, static_shots))
+            if args.dynamic_num > 0:
+                encoding = sentence_encoder.encode(
+                    postprocess(response, db_id),
+                    batch_size=1,
+                    normalize_embeddings=True,
+                    convert_to_tensor=True,
+                    device=args.device
+                ).cpu().tolist()
+                dynamic_shots = get_dynamic_shots(encoding, train_dataset, prompt, args)
+                response = get_response(prompt.get_prompt(db_id, question, static_shots + dynamic_shots))
+        file.write(postprocess(response, db_id) + '\n')
         file.flush()
     file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)
@@ -103,7 +123,7 @@ start_time = time.time()
 if args.cluster_method == 'random':
     train_dataset = encode_dataset('train', args)
 else:
-    with open(f'data/train.{args.cluster_method}.{args.cluster_num}.bin', 'rb') as file:
+    with open(f'data/train.{args.cluster_method}.{args.cluster_num}.{args.encoding}.bin', 'rb') as file:
         train_dataset = pickle.load(file)
 dev_dataset = encode_dataset('dev', args)
 print(f'Dataset size: train -> {len(train_dataset):d}, dev -> {len(dev_dataset):d} ;')

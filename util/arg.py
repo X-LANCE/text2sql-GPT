@@ -10,11 +10,12 @@ def main_args():
     arg_parser.add_argument('--content', default=3, type=int, help='number of database records')
     arg_parser.add_argument('--zero_shot', action='store_true', help='zero shot')
     arg_parser.add_argument('--plm', default='text2vec-base-chinese', type=str, help='plm for preprocessing')
-    arg_parser.add_argument('--batch_size', default=256, type=int, help='batch size for preprocessing')
+    arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size for preprocessing')
     arg_parser.add_argument('--device', default=0, type=int, help='gpu id (-1 represents cpu)')
     arg_parser.add_argument('--cluster_method', default='kmeans', type=str, choices=['kmeans', 'agglomerative', 'random'], help='clustering method')
     arg_parser.add_argument('--cluster_num', default=3, type=int, help='number of clusters')
     arg_parser.add_argument('--dynamic_num', default=3, type=int, help='number of dynamic shots')
+    arg_parser.add_argument('--encoding', default='question', type=str, choices=['question', 'query'], help='according to question or query encoding')
     args = arg_parser.parse_args()
     assert (not args.api_doc) or args.pf == 'no'
     args.log_path = 'seed_' + str(args.seed)
@@ -24,6 +25,7 @@ def main_args():
     if not args.zero_shot:
         args.log_path += '__' + args.cluster_method + '__cluster_' + str(args.cluster_num)
         args.log_path += '__dynamic_' + str(args.dynamic_num)
+        args.log_path += '__encoding_' + args.encoding
     args.log_path = os.path.join('log', args.log_path)
     return args
 
@@ -31,10 +33,11 @@ def main_args():
 def cluster_args():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument('--plm', default='text2vec-base-chinese', type=str, help='plm for preprocessing')
-    arg_parser.add_argument('--batch_size', default=256, type=int, help='batch size for preprocessing')
+    arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size for preprocessing')
     arg_parser.add_argument('--device', default=0, type=int, help='gpu id (-1 represents cpu)')
     arg_parser.add_argument('--method', default='kmeans', type=str, choices=['kmeans', 'agglomerative'], help='clustering method')
     arg_parser.add_argument('--cluster', default=3, type=int, help='number of clusters')
+    arg_parser.add_argument('--encoding', default='question', type=str, choices=['question', 'query'], help='according to question or query encoding')
     args = arg_parser.parse_args()
     args.device = 'cpu' if args.device < 0 else f'cuda:{args.device}'
     return args

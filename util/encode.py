@@ -12,7 +12,7 @@ def encode_dataset(choice, args):
         return dataset
     dataset = Example.load_dataset(choice)
     sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
-    encodings = sentence_encoder.encode(
+    question_encodings = sentence_encoder.encode(
         [example['question'] for example in dataset],
         batch_size=args.batch_size,
         show_progress_bar=True,
@@ -20,8 +20,17 @@ def encode_dataset(choice, args):
         convert_to_tensor=True,
         device=args.device
     ).cpu().tolist()
+    query_encodings = sentence_encoder.encode(
+        [example['query'].strip('\t ;') for example in dataset],
+        batch_size=args.batch_size,
+        show_progress_bar=True,
+        normalize_embeddings=True,
+        convert_to_tensor=True,
+        device=args.device
+    ).cpu().tolist()
     for i, example in enumerate(dataset):
-        example['encoding'] = encodings[i]
+        example['question_encoding'] = question_encodings[i]
+        example['query_encoding'] = query_encodings[i]
     with open(filename, 'wb') as file:
         pickle.dump(dataset, file)
     return dataset
