@@ -1,6 +1,8 @@
 import json
 import os
+import random
 import sqlite3
+from sentence_transformers import util
 
 
 class Prompt:
@@ -62,6 +64,39 @@ class Prompt:
             prompt += 'Translate the natural utterance into the SQL query: ' + question + '\n'
             prompt += 'SELECT'
         return prompt
+
+    def is_valid_shots(self, shots, args):
+        return len(self.get_prompt(None, None, shots)) < 15000 * len(shots) / (args.cluster_num + args.dynamic_num)
+
+    def get_static_shots(self, dataset, args):
+        if args.zero_shot or args.cluster_num == 0:
+            return []
+        while 1:
+            if args.cluster_method == 'random':
+                shots = set()
+                while len(shots) < args.cluster_num:
+                    shots.add(random.randint(0, len(dataset) - 1))
+                shots = [dataset[id] for id in shots]
+            else:
+                shots = []
+                for cluster in range(args.cluster_num):
+                    shots.append(random.choice([example for example in dataset if example['cluster'] == cluster]))
+            if self.is_valid_shots(shots, args):
+                return shots
+
+    def get_dynamic_shots(self, encoding, dataset, args):
+        if args.zero_shot or args.dynamic_num == 0:
+            return []
+        scores = util.cos_sim(encoding, [example[args.encoding + '_encoding'] for example in dataset]).squeeze(0).tolist()
+        scores = sorted(enumerate(scores), key=lambda x: -x[1])
+        shots = []
+        for item in scores:
+            shots.append(dataset[item[0]])
+            if not self.is_valid_shots(shots, args):
+                shots.pop()
+            elif len(shots) == args.dynamic_num:
+                break
+        return shots
 
 
 def dict_factory(cursor, row):

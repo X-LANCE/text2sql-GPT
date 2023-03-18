@@ -4,47 +4,11 @@ import pickle
 import random
 import time
 from eval.evaluation import isValidSQL
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import SentenceTransformer
 from util.arg import main_args
 from util.encode import encode_dataset
 from util.example import Example
 from util.prompt import Prompt
-
-
-def is_valid_shots(shots, prompt, args):
-    return len(prompt.get_prompt(None, None, shots)) < 15000 * len(shots) / (args.cluster_num + args.dynamic_num)
-
-
-def get_static_shots(dataset, prompt, args):
-    if args.zero_shot or args.cluster_num == 0:
-        return []
-    while 1:
-        if args.cluster_method == 'random':
-            shots = set()
-            while len(shots) < args.cluster_num:
-                shots.add(random.randint(0, len(dataset) - 1))
-            shots = [dataset[id] for id in shots]
-        else:
-            shots = []
-            for cluster in range(args.cluster_num):
-                shots.append(random.choice([example for example in dataset if example['cluster'] == cluster]))
-        if is_valid_shots(shots, prompt, args):
-            return shots
-
-
-def get_dynamic_shots(encoding, dataset, prompt, args):
-    if args.zero_shot or args.dynamic_num == 0:
-        return []
-    scores = util.cos_sim(encoding, [example[args.encoding + '_encoding'] for example in dataset]).squeeze(0).tolist()
-    scores = sorted(enumerate(scores), key=lambda x: -x[1])
-    shots = []
-    for item in scores:
-        shots.append(dataset[item[0]])
-        if not is_valid_shots(shots, prompt, args):
-            shots.pop()
-        elif len(shots) == args.dynamic_num:
-            break
-    return shots
 
 
 def get_response(prompt):
@@ -76,8 +40,8 @@ def postprocess(sql, db_id):
 def decode(train_dataset, dev_dataset, args, etype='all'):
     openai.api_key = os.getenv('OPENAI_API_KEY')
     prompt = Prompt(args=args)
-    static_shots = get_static_shots(train_dataset, prompt, args)
-    if args.encoding == 'query':
+    static_shots = prompt.get_static_shots(train_dataset, args)
+    if args.encoding == 'query' and (not args.oracle):
         sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
@@ -95,8 +59,8 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             continue
         db_id = example['db_id']
         question = example['question']
-        if args.encoding == 'question':
-            dynamic_shots = get_dynamic_shots(example['question_encoding'], train_dataset, prompt, args)
+        if args.encoding == 'question' or args.oracle:
+            dynamic_shots = prompt.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
             response = get_response(prompt.get_prompt(db_id, question, static_shots + dynamic_shots))
         else:
             response = get_response(prompt.get_prompt(db_id, question, static_shots))
@@ -108,7 +72,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                     convert_to_tensor=True,
                     device=args.device
                 ).cpu().tolist()
-                dynamic_shots = get_dynamic_shots(encoding, train_dataset, prompt, args)
+                dynamic_shots = prompt.get_dynamic_shots(encoding, train_dataset, args)
                 response = get_response(prompt.get_prompt(db_id, question, static_shots + dynamic_shots))
         file.write(postprocess(response, db_id) + '\n')
         file.flush()

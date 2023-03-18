@@ -16,8 +16,10 @@ def main_args():
     arg_parser.add_argument('--cluster_num', default=3, type=int, help='number of clusters')
     arg_parser.add_argument('--dynamic_num', default=3, type=int, help='number of dynamic shots')
     arg_parser.add_argument('--encoding', default='question', type=str, choices=['question', 'query'], help='according to question or query encoding')
+    arg_parser.add_argument('--oracle', action='store_true', help='given queries in the dev dataset')
     args = arg_parser.parse_args()
     assert (not args.api_doc) or args.pf == 'no'
+    assert args.encoding == 'query' or (not args.oracle)
     args.log_path = 'seed_' + str(args.seed)
     args.log_path += '__' + ('api_doc' if args.api_doc else (args.pf + '_pf'))
     args.log_path += '__content_' + str(args.content)
@@ -26,6 +28,8 @@ def main_args():
         args.log_path += '__' + args.cluster_method + '__cluster_' + str(args.cluster_num)
         args.log_path += '__dynamic_' + str(args.dynamic_num)
         args.log_path += '__encoding_' + args.encoding
+        if args.oracle:
+            args.log_path += '__oracle'
     args.log_path = os.path.join('log', args.log_path)
     return args
 
