@@ -3,73 +3,7 @@ import openai
 import os
 import requests
 import time
-import ujson
-from enum import Enum
-from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Union
 from util.constant import SPEECH_API_TOKEN
-
-
-class OpenAIModel(Enum):
-    ADA_001 = 'text-ada-001'
-    BABBAGE_001 = 'text-babbage-001'
-    DAVINCI_003 = 'text-davinci-003'
-    EMBEDDING = 'text-embedding-ada-002'
-    FREE_CHATGPT_MODEL = 'text-davinci-002-render-sha'
-    PAID_CHATGPT_MODEL = 'text-davinci-002-render-paid'
-    TURBO = 'gpt-3.5-turbo'
-
-
-class ChatRole(Enum):
-    ROBOT = 'assistant'
-    USER = 'user'
-    SYSTEM = 'system'
-
-
-class CompletionParams(BaseModel):
-    model: OpenAIModel = Field(default=OpenAIModel.BABBAGE_001)
-    user: str = Field(default=None)
-    max_tokens: int = Field(default=100)
-    temperature: float = Field(default=0.0)
-    presence_penalty: float = Field(default=0.0)
-    frequency_penalty: float = Field(default=0.0)
-    n: Optional[int] = Field(default=1, const=True)
-    stream: Optional[bool] = Field(default=False)
-    top_p: int = Field(default=1, const=True)
-    logit_bias: Optional[Dict[str, float]] = Field(default=None)
-    stop: Optional[Union[str, List[str]]] = Field(default=None)
-
-
-class TextCompletionParams(CompletionParams):
-    prompt: str = Field(default='This is a test!')
-    suffix: Optional[str] = Field(default=None)
-    logprobs: Optional[int] = Field(default=None, le=5)
-    echo: Optional[bool] = Field(default=False, const=True)
-    best_of: Optional[int] = Field(default=1, const=True)
-
-
-class ChatMessage(BaseModel):
-    content: str = Field(default='')
-    role: ChatRole = Field(default=ChatRole.USER)
-
-
-class ChatCompletionParams(CompletionParams):
-    messages: List[ChatMessage] = Field()
-
-    class Config:
-        json_loads = ujson.loads
-        json_dumps = ujson.dumps
-        schema_extra = {
-            'example': {
-                'model': OpenAIModel.TURBO,
-                'user': 'test-user',
-                'messages': [{'role': 'user', 'content': '你好，今天天气不错！'}],
-                'max_tokens': 1000,
-                'temperature': 0.0,
-                'presence_penalty': 0.0,
-                'frequency_penalty': 0.0
-            }
-        }
 
 
 def get_response(prompt, args):
