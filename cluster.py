@@ -1,3 +1,4 @@
+import os
 import pickle
 import time
 from sklearn.cluster import AgglomerativeClustering, KMeans
@@ -21,5 +22,5 @@ print('Start clustering ...')
 start_time = time.time()
 cluster(dataset, args)
 print(f'Clustering costs {time.time() - start_time:.2f}s ;')
-with open(f'data/train.{args.method}.{args.cluster}.{args.encoding}.bin', 'wb') as file:
+with open(os.path.join('data', args.dataset, f'train.{args.method}.{args.cluster}.{args.encoding}.bin'), 'wb') as file:
     pickle.dump(dataset, file)

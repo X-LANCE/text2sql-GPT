@@ -1,4 +1,5 @@
 import json
+import os
 from eval.evaluator import Evaluator
 from torch.utils.data import Dataset
 
@@ -17,16 +18,17 @@ class SQLDataset(Dataset):
 
 class Example:
     @classmethod
-    def configuration(cls, table_path='data/tables.json', db_dir='data/database'):
-        cls.evaluator = Evaluator(table_path, db_dir)
+    def configuration(cls, args):
+        cls.dataset_dir = os.path.join('data', args.dataset)
+        cls.evaluator = Evaluator(os.path.join(cls.dataset_dir, 'tables.json'), os.path.join(cls.dataset_dir, 'database'))
 
     @classmethod
-    def load_dataset(cls, choice):
+    def load_dataset(cls, choice, args):
         assert choice in ['train', 'dev']
-        with open(f'data/{choice}.json', 'r', encoding='utf-8') as file:
+        with open(os.path.join('data', args.dataset, choice + '.json'), 'r', encoding='utf-8') as file:
             dataset = json.load(file)
         return SQLDataset(dataset)
 
     @classmethod
-    def use_database_testsuite(cls, db_dir='data/database-testsuite'):
-        cls.evaluator.change_database(db_dir)
+    def use_database_testsuite(cls):
+        cls.evaluator.change_database(os.path.join(cls.dataset_dir, 'database-testsuite'))

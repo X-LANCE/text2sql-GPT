@@ -4,7 +4,7 @@ from eval.evaluation import build_foreign_key_map_from_json, evaluate
 
 
 class Evaluator:
-    def __init__(self, table_path='data/tables.json', db_dir='data/database'):
+    def __init__(self, table_path, db_dir):
         self.table_path = table_path
         self.db_dir = db_dir
         self.kmaps = build_foreign_key_map_from_json(self.table_path)

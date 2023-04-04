@@ -5,12 +5,12 @@ from util.example import Example
 
 
 def encode_dataset(choice, args):
-    filename = f'data/{choice}.bin'
+    filename = os.path.join('data', args.dataset, choice + '.bin')
     if os.path.exists(filename):
         with open(filename, 'rb') as file:
             dataset = pickle.load(file)
         return dataset
-    dataset = Example.load_dataset(choice)
+    dataset = Example.load_dataset(choice, args)
     sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
     question_encodings = sentence_encoder.encode(
         [example['question'] for example in dataset],

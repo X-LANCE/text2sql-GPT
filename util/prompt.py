@@ -1,13 +1,16 @@
-import json
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import json
 import random
 import sqlite3
 from sentence_transformers import util
+from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS
 
 
-class Prompt:
-    def __init__(self, args, table_path='data/tables.json', db_dir='data/database'):
-        with open(table_path, 'r', encoding='utf-8') as file:
+class PromptMaker:
+    def __init__(self, args):
+        with open(os.path.join('data', args.dataset, 'tables.json'), 'r', encoding='utf-8') as file:
             dbs = json.load(file)
         self.db_prompts = {}
         for db in dbs:
@@ -39,7 +42,7 @@ class Prompt:
                                 self.db_prompts[db_id] += f'    foreign key ({cols[fk[0]][1]}) references {tabs[cols[fk[1]][0]]}({cols[fk[1]][1]}),\n'
                     self.db_prompts[db_id] = self.db_prompts[db_id][:-2] + '\n)\n'
                 if args.content > 0:
-                    conn = sqlite3.connect(os.path.join(db_dir, db_id, db_id + '.sqlite'))
+                    conn = sqlite3.connect(os.path.join('data', args.dataset, 'database', db_id, db_id + '.sqlite'))
                     conn.row_factory = dict_factory
                     cursor = conn.cursor()
                     db_contents = cursor.execute(f'SELECT * FROM {tabs[i]} LIMIT {args.content}').fetchall()
@@ -51,22 +54,44 @@ class Prompt:
                     self.db_prompts[db_id] += '*/\n'
             self.db_prompts[db_id] = self.db_prompts[db_id][:-1]
 
-    def get_prompt(self, db_id=None, question=None, shots=[]):
-        prompt = ''
-        for shot in shots:
-            prompt += 'Given the database schema:\n'
-            prompt += self.db_prompts[shot['db_id']] + '\n'
-            prompt += 'Translate the natural utterance into the SQL query: ' + shot['question'] + '\n'
-            prompt += shot['query'] + '\n'
-        if db_id and question:
-            prompt += 'Given the database schema:\n'
-            prompt += self.db_prompts[db_id] + '\n'
-            prompt += 'Translate the natural utterance into the SQL query: ' + question + '\n'
-            prompt += 'SELECT'
+    def get_prompt(self, args, db_id=None, question=None, shots=[]):
+        if args.gpt in GPT_CHAT_MODELS:
+            prompt = [{'role': 'system', 'content': 'Given the database schema, you need to translate the question into the SQL query.'}]
+            for shot in shots:
+                prompt.append({
+                    'role': 'user',
+                    'content': f"Database schema:\n{self.db_prompts[shot['db_id']]}\nQuestion: {shot['question']}"
+                })
+                prompt.append({
+                    'role': 'assistant',
+                    'content': shot['query']
+                })
+            if db_id and question:
+                prompt.append({
+                    'role': 'user',
+                    'content': f'Database schema:\n{self.db_prompts[db_id]}\nQuestion: {question}'
+                })
+        elif args.gpt in GPT_COMPLETION_MODELS:
+            prompt = ''
+            for shot in shots:
+                prompt += 'Given the database schema:\n'
+                prompt += self.db_prompts[shot['db_id']] + '\n'
+                prompt += 'Translate the natural utterance into the SQL query: ' + shot['question'] + '\n'
+                prompt += shot['query'] + '\n'
+            if db_id and question:
+                prompt += 'Given the database schema:\n'
+                prompt += self.db_prompts[db_id] + '\n'
+                prompt += 'Translate the natural utterance into the SQL query: ' + question + '\n'
+                prompt += 'SELECT'
+        else:
+            raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
 
     def is_valid_shots(self, shots, args):
-        return len(self.get_prompt(None, None, shots)) < 15000 * len(shots) / (args.cluster_num + args.dynamic_num)
+        prompt = self.get_prompt(args, shots=shots)
+        prompt_len = len(prompt) if isinstance(prompt, str) else sum([len(message['content']) for message in prompt])
+        max_len = 15000 if args.gpt == 'code-davinci-002' else 7500
+        return prompt_len < max_len * len(shots) / (args.cluster_num + args.dynamic_num)
 
     def get_static_shots(self, dataset, args):
         if args.zero_shot or args.cluster_num == 0:
@@ -107,12 +132,18 @@ def dict_factory(cursor, row):
 
 
 if __name__ == '__main__':
-    import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from util.arg import main_args
     args = main_args()
     print('log path:', args.log_path)
-    prompt = Prompt(args=args)
+    prompt_maker = PromptMaker(args=args)
     db_id = input('db: ')
     question = input('question: ')
-    print(prompt.get_prompt(db_id, question))
+    prompt = prompt_maker.get_prompt(args, db_id, question)
+    if isinstance(prompt, str):
+        print(prompt)
+    else:
+        for message in prompt:
+            print('role:', message['role'])
+            print('content:')
+            print(message['content'])
+            print()

@@ -4,6 +4,8 @@ import os
 
 def main_args():
     arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('--dataset', default='spider', type=str, help='dataset name')
+    arg_parser.add_argument('--gpt', default='gpt-3.5-turbo', type=str, help='GPT model')
     arg_parser.add_argument('--seed', default=42, type=int, help='random seed')
     arg_parser.add_argument('--api_doc', action='store_true', help='write schema according to api doc')
     arg_parser.add_argument('--pf', default='eoc', type=str, choices=['no', 'eoc', 'eot'], help='format of primary and foreign keys')
@@ -17,10 +19,12 @@ def main_args():
     arg_parser.add_argument('--dynamic_num', default=3, type=int, help='number of dynamic shots')
     arg_parser.add_argument('--encoding', default='question', type=str, choices=['question', 'query'], help='according to question or query encoding')
     arg_parser.add_argument('--oracle', action='store_true', help='given queries in the dev dataset')
+    arg_parser.add_argument('--speech_api', action='store_true', help='use speech api')
     args = arg_parser.parse_args()
     assert (not args.api_doc) or args.pf == 'no'
     assert args.encoding == 'query' or (not args.oracle)
-    args.log_path = 'seed_' + str(args.seed)
+    args.log_path = args.gpt
+    args.log_path += '__seed_' + str(args.seed)
     args.log_path += '__' + ('api_doc' if args.api_doc else (args.pf + '_pf'))
     args.log_path += '__content_' + str(args.content)
     args.log_path += '__' + ('zero' if args.zero_shot else 'few') + '_shot'
@@ -30,12 +34,13 @@ def main_args():
         args.log_path += '__encoding_' + args.encoding
         if args.oracle:
             args.log_path += '__oracle'
-    args.log_path = os.path.join('log', args.log_path)
+    args.log_path = os.path.join('log', args.dataset, args.log_path)
     return args
 
 
 def cluster_args():
     arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('--dataset', default='spider', type=str, help='dataset name')
     arg_parser.add_argument('--plm', default='text2vec-base-chinese', type=str, help='plm for preprocessing')
     arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size for preprocessing')
     arg_parser.add_argument('--device', default=0, type=int, help='gpu id (-1 represents cpu)')
