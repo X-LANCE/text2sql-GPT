@@ -10,7 +10,7 @@ def encode_dataset(choice, args):
         with open(filename, 'rb') as file:
             dataset = pickle.load(file)
         return dataset
-    dataset = Example.load_dataset(choice, args)
+    dataset = Example.load_dataset(args.dataset, choice)
     sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
     question_encodings = sentence_encoder.encode(
         [example['question'] for example in dataset],

@@ -2,7 +2,8 @@ import os
 import pickle
 import random
 import time
-from eval.evaluation import isValidSQL
+from eval.evaluation import Evaluator, isValidSQL
+from eval.process_sql import Schema, get_schema, get_sql
 from sentence_transformers import SentenceTransformer
 from util.arg import main_args
 from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS
@@ -10,6 +11,11 @@ from util.encode import encode_dataset
 from util.example import Example
 from util.gpt import get_response
 from util.prompt import PromptMaker
+
+
+def eval_hardness(db_id, sql):
+    schema = Schema(get_schema(os.path.join(Example.evaluator.db_dir, db_id, db_id + '.sqlite')))
+    return Evaluator().eval_hardness(get_sql(schema, sql))
 
 
 def postprocess(response, db_id, args):
@@ -25,7 +31,7 @@ def postprocess(response, db_id, args):
     else:
         raise ValueError(f'unknown GPT model {args.gpt}')
     sql = original_sql = ' '.join(original_sql.replace('==', '=').replace('<>', '!=').split())
-    while sql != 'SELECT' and not isValidSQL(sql, os.path.join('data', args.dataset, 'database', db_id, db_id + '.sqlite')):
+    while sql != 'SELECT' and not isValidSQL(sql, os.path.join(Example.evaluator.db_dir, db_id, db_id + '.sqlite')):
         sql = ' '.join(sql.split()[:-1])
     return original_sql if sql == 'SELECT' else sql
 
@@ -51,7 +57,15 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             continue
         db_id = example['db_id']
         question = example['question']
-        if args.encoding == 'question' or args.oracle:
+        query = example['query']
+        if args.hard_and_extra and eval_hardness(db_id, query) in ['easy', 'medium']:
+            file.write(query.strip('\t ;') + '\n')
+            file.flush()
+            continue
+        if args.two_phase:
+            response = get_response(prompt_maker.get_prompt_phase_1(args, question), args)
+            response = get_response(prompt_maker.get_prompt_phase_2(args, db_id, question, postprocess(response, db_id, args)), args)
+        elif args.encoding == 'question' or args.oracle:
             dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
             response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), args)
         else:
@@ -74,7 +88,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
 
 args = main_args()
 random.seed(args.seed)
-Example.configuration(args)
+Example.configuration(args.dataset)
 start_time = time.time()
 if args.cluster_method == 'random':
     train_dataset = encode_dataset('train', args)

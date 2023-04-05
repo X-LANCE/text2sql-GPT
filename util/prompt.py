@@ -87,6 +87,37 @@ class PromptMaker:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
 
+    def get_prompt_phase_1(self, args, question):
+        if args.gpt in GPT_CHAT_MODELS:
+            prompt = [
+                {'role': 'system', 'content': 'You need to translate the question into the SQL query.'},
+                {'role': 'user', 'content': question}
+            ]
+        elif args.gpt in GPT_COMPLETION_MODELS:
+            prompt = f'Translate the natural utterance into the SQL query: {question}\nSELECT'
+        else:
+            raise ValueError(f'unknown GPT model {args.gpt}')
+        return prompt
+
+    def get_prompt_phase_2(self, args, db_id, question, sql):
+        if args.gpt in GPT_CHAT_MODELS:
+            prompt = [
+                {'role': 'system', 'content': 'You need to translate the question into the SQL query.'},
+                {'role': 'user', 'content': question},
+                {'role': 'assistant', 'content': sql},
+                {'role': 'user', 'content': f'Now given the database schema:\n{self.db_prompts[db_id]}\nCorrect your answer.'}
+            ]
+        elif args.gpt in GPT_COMPLETION_MODELS:
+            prompt = 'Translate the natural utterance into the SQL query: ' + question + '\n'
+            prompt += sql + '\n'
+            prompt += 'Now given the database schema:' + '\n'
+            prompt += self.db_prompts[db_id] + '\n'
+            prompt += 'Correct your answer.' + '\n'
+            prompt += 'SELECT'
+        else:
+            raise ValueError(f'unknown GPT model {args.gpt}')
+        return prompt
+
     def is_valid_shots(self, shots, args):
         prompt = self.get_prompt(args, shots=shots)
         prompt_len = len(prompt) if isinstance(prompt, str) else sum([len(message['content']) for message in prompt])
@@ -133,17 +164,25 @@ def dict_factory(cursor, row):
 
 if __name__ == '__main__':
     from util.arg import main_args
+
+    def print_prompt(prompt):
+        if isinstance(prompt, str):
+            print(prompt)
+        else:
+            for message in prompt:
+                print('role:', message['role'])
+                print('content:')
+                print(message['content'])
+                print()
+
     args = main_args()
     print('log path:', args.log_path)
     prompt_maker = PromptMaker(args=args)
     db_id = input('db: ')
-    question = input('question: ')
-    prompt = prompt_maker.get_prompt(args, db_id, question)
-    if isinstance(prompt, str):
-        print(prompt)
+    question = 'List all items in the table.'
+    sql = 'SELECT * FROM table'
+    if args.two_phase:
+        print_prompt(prompt_maker.get_prompt_phase_1(args, question))
+        print_prompt(prompt_maker.get_prompt_phase_2(args, db_id, question, sql))
     else:
-        for message in prompt:
-            print('role:', message['role'])
-            print('content:')
-            print(message['content'])
-            print()
+        print_prompt(prompt_maker.get_prompt(args, db_id, question))

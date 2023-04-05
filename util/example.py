@@ -18,14 +18,14 @@ class SQLDataset(Dataset):
 
 class Example:
     @classmethod
-    def configuration(cls, args):
-        cls.dataset_dir = os.path.join('data', args.dataset)
+    def configuration(cls, dataset):
+        cls.dataset_dir = os.path.join('data', dataset)
         cls.evaluator = Evaluator(os.path.join(cls.dataset_dir, 'tables.json'), os.path.join(cls.dataset_dir, 'database'))
 
     @classmethod
-    def load_dataset(cls, choice, args):
+    def load_dataset(cls, dataset_name, choice):
         assert choice in ['train', 'dev']
-        with open(os.path.join('data', args.dataset, choice + '.json'), 'r', encoding='utf-8') as file:
+        with open(os.path.join('data', dataset_name, choice + '.json'), 'r', encoding='utf-8') as file:
             dataset = json.load(file)
         return SQLDataset(dataset)
 
