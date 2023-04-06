@@ -25,7 +25,6 @@ def main_args():
     args = arg_parser.parse_args()
     assert (not args.api_doc) or args.pf == 'no'
     assert args.encoding == 'query' or (not args.oracle)
-    assert args.zero_shot or (not args.two_phase)
     args.log_path = args.gpt
     args.log_path += '__seed_' + str(args.seed)
     args.log_path += '__' + ('api_doc' if args.api_doc else (args.pf + '_pf'))

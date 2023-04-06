@@ -18,19 +18,27 @@ def eval_hardness(db_id, sql):
     return Evaluator().eval_hardness(get_sql(schema, sql))
 
 
-def postprocess(response, db_id, args):
-    if args.gpt in GPT_CHAT_MODELS:
+def postprocess(response, gpt, db_id=None):
+    if gpt in GPT_CHAT_MODELS:
         start_idx = response.find('SELECT')
         if start_idx < 0:
             start_idx = response.find('select')
         if start_idx < 0:
             return response
         original_sql = response[start_idx:]
-    elif args.gpt in GPT_COMPLETION_MODELS:
+        end_idx = original_sql.find('```')
+        if end_idx >= 0:
+            original_sql = original_sql[:end_idx]
+    elif gpt in GPT_COMPLETION_MODELS:
         original_sql = 'SELECT ' + response
     else:
-        raise ValueError(f'unknown GPT model {args.gpt}')
-    sql = original_sql = ' '.join(original_sql.replace('==', '=').replace('<>', '!=').split())
+        raise ValueError(f'unknown GPT model {gpt}')
+    original_sql = ' '.join(original_sql.replace('==', '=').replace('<>', '!=').split())
+    original_sql = original_sql.replace('INNER JOIN', 'JOIN').replace('inner join', 'join')
+    original_sql = original_sql.replace('LEFT JOIN', 'JOIN').replace('left join', 'join')
+    if db_id is None:
+        return original_sql
+    sql = original_sql
     while sql != 'SELECT' and not isValidSQL(sql, os.path.join(Example.evaluator.db_dir, db_id, db_id + '.sqlite')):
         sql = ' '.join(sql.split()[:-1])
     return original_sql if sql == 'SELECT' else sql
@@ -62,25 +70,26 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             file.write(query.strip('\t ;') + '\n')
             file.flush()
             continue
-        if args.two_phase:
-            response = get_response(prompt_maker.get_prompt_phase_1(args, question), args)
-            response = get_response(prompt_maker.get_prompt_phase_2(args, db_id, question, postprocess(response, db_id, args)), args)
-        elif args.encoding == 'question' or args.oracle:
+        if args.zero_shot or args.dynamic_num == 0 or args.encoding == 'question' or args.oracle:
             dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
-            response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), args)
         else:
             response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots), args)
-            if args.dynamic_num > 0:
-                encoding = sentence_encoder.encode(
-                    postprocess(response, db_id, args),
-                    batch_size=1,
-                    normalize_embeddings=True,
-                    convert_to_tensor=True,
-                    device=args.device
-                ).cpu().tolist()
-                dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
-                response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), args)
-        file.write(postprocess(response, db_id, args) + '\n')
+            encoding = sentence_encoder.encode(
+                postprocess(response, args.gpt, db_id),
+                batch_size=1,
+                normalize_embeddings=True,
+                convert_to_tensor=True,
+                device=args.device
+            ).cpu().tolist()
+            dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
+        if args.two_phase:
+            prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, static_shots + dynamic_shots)
+            response = get_response(prompt_phase_1, args)
+            prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, postprocess(response, args.gpt), db_id)
+            response = get_response(prompt_phase_2, args)
+        else:
+            response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), args)
+        file.write(postprocess(response, args.gpt, db_id) + '\n')
         file.flush()
     file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)

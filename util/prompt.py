@@ -58,19 +58,10 @@ class PromptMaker:
         if args.gpt in GPT_CHAT_MODELS:
             prompt = [{'role': 'system', 'content': 'Given the database schema, you need to translate the question into the SQL query.'}]
             for shot in shots:
-                prompt.append({
-                    'role': 'user',
-                    'content': f"Database schema:\n{self.db_prompts[shot['db_id']]}\nQuestion: {shot['question']}"
-                })
-                prompt.append({
-                    'role': 'assistant',
-                    'content': shot['query']
-                })
+                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']]}\nQuestion: {shot['question']}"})
+                prompt.append({'role': 'assistant', 'content': shot['query']})
             if db_id and question:
-                prompt.append({
-                    'role': 'user',
-                    'content': f'Database schema:\n{self.db_prompts[db_id]}\nQuestion: {question}'
-                })
+                prompt.append({'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id]}\nQuestion: {question}'})
         elif args.gpt in GPT_COMPLETION_MODELS:
             prompt = ''
             for shot in shots:
@@ -87,39 +78,49 @@ class PromptMaker:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
 
-    def get_prompt_phase_1(self, args, question):
+    def get_prompt_phase_1(self, args, question=None, shots=[]):
         if args.gpt in GPT_CHAT_MODELS:
-            prompt = [
-                {'role': 'system', 'content': 'You need to translate the question into the SQL query.'},
-                {'role': 'user', 'content': question}
-            ]
+            prompt = [{'role': 'system', 'content': 'You need to translate the question into the SQL query.'}]
+            for shot in shots:
+                prompt.append({'role': 'user', 'content': shot['question']})
+                prompt.append({'role': 'assistant', 'content': shot['pseudo_query']})
+                prompt.append({'role': 'user', 'content': f"Now given the database schema:\n{self.db_prompts[shot['db_id']]}\nCorrect your answer."})
+                prompt.append({'role': 'assistant', 'content': shot['query']})
+            if question:
+                prompt.append({'role': 'user', 'content': question})
         elif args.gpt in GPT_COMPLETION_MODELS:
-            prompt = f'Translate the natural utterance into the SQL query: {question}\nSELECT'
+            prompt = ''
+            for shot in shots:
+                prompt += 'Translate the natural utterance into the SQL query: ' + shot['question'] + '\n'
+                prompt += shot['pseudo_query'] + '\n'
+                prompt += 'Now given the database schema:\n'
+                prompt += self.db_prompts[shot['db_id']] + '\n'
+                prompt += 'Correct your answer.\n'
+                prompt += shot['query'] + '\n'
+            if question:
+                prompt += f'Translate the natural utterance into the SQL query: {question}\nSELECT'
         else:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
 
-    def get_prompt_phase_2(self, args, db_id, question, sql):
-        if args.gpt in GPT_CHAT_MODELS:
-            prompt = [
-                {'role': 'system', 'content': 'You need to translate the question into the SQL query.'},
-                {'role': 'user', 'content': question},
-                {'role': 'assistant', 'content': sql},
-                {'role': 'user', 'content': f'Now given the database schema:\n{self.db_prompts[db_id]}\nCorrect your answer.'}
-            ]
-        elif args.gpt in GPT_COMPLETION_MODELS:
-            prompt = 'Translate the natural utterance into the SQL query: ' + question + '\n'
-            prompt += sql + '\n'
-            prompt += 'Now given the database schema:' + '\n'
-            prompt += self.db_prompts[db_id] + '\n'
-            prompt += 'Correct your answer.' + '\n'
-            prompt += 'SELECT'
+    def get_prompt_phase_2(self, previous_prompt, pseudo_query, db_id):
+        prompt = previous_prompt
+        if isinstance(prompt, list):
+            prompt.append({'role': 'assistant', 'content': pseudo_query})
+            prompt.append({'role': 'user', 'content': f'Now given the database schema:\n{self.db_prompts[db_id]}\nCorrect your answer.'})
         else:
-            raise ValueError(f'unknown GPT model {args.gpt}')
+            assert prompt[-6:] == 'SELECT'
+            prompt = prompt[:-6]
+            assert prompt[-1] == '\n'
+            prompt += pseudo_query + '\n'
+            prompt += 'Now given the database schema:\n'
+            prompt += self.db_prompts[db_id] + '\n'
+            prompt += 'Correct your answer.\n'
+            prompt += 'SELECT'
         return prompt
 
     def is_valid_shots(self, shots, args):
-        prompt = self.get_prompt(args, shots=shots)
+        prompt = self.get_prompt_phase_1(args, shots=shots) if args.two_phase else self.get_prompt(args, shots=shots)
         prompt_len = len(prompt) if isinstance(prompt, str) else sum([len(message['content']) for message in prompt])
         max_len = 15000 if args.gpt == 'code-davinci-002' else 7500
         return prompt_len < max_len * len(shots) / (args.cluster_num + args.dynamic_num)
@@ -180,9 +181,11 @@ if __name__ == '__main__':
     prompt_maker = PromptMaker(args=args)
     db_id = input('db: ')
     question = 'List all items in the table.'
-    sql = 'SELECT * FROM table'
+    pseudo_query = 'SELECT * FROM table'
     if args.two_phase:
-        print_prompt(prompt_maker.get_prompt_phase_1(args, question))
-        print_prompt(prompt_maker.get_prompt_phase_2(args, db_id, question, sql))
+        prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question)
+        print_prompt(prompt_phase_1)
+        prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_query, db_id)
+        print_prompt(prompt_phase_2)
     else:
         print_prompt(prompt_maker.get_prompt(args, db_id, question))
