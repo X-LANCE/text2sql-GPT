@@ -1,3 +1,4 @@
+import json
 import os
 import pickle
 import random
@@ -53,12 +54,19 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         os.makedirs(args.log_path)
     pred_filename = os.path.join(args.log_path, 'pred.sql')
     if os.path.exists(pred_filename):
-        with open(pred_filename, 'r', encoding='utf-8') as file:
-            cached = file.read().count('\n')
-        file = open(pred_filename, 'a', encoding='utf-8')
+        with open(pred_filename, 'r', encoding='utf-8') as pred_file:
+            cached = pred_file.read().count('\n')
+        pred_file = open(pred_filename, 'a', encoding='utf-8')
     else:
         cached = 0
-        file = open(pred_filename, 'w', encoding='utf-8')
+        pred_file = open(pred_filename, 'w', encoding='utf-8')
+    if args.two_phase:
+        pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
+        if os.path.exists(pseudo_filename):
+            with open(pseudo_filename, 'r', encoding='utf-8') as pseudo_file:
+                pseudo_queries = json.load(pseudo_file)
+        else:
+            pseudo_queries = {}
     for i, example in enumerate(dev_dataset):
         print(f'Decoding example {i} ...')
         if i < cached:
@@ -67,8 +75,8 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         question = example['question']
         query = example['query']
         if args.hard_and_extra and eval_hardness(db_id, query) in ['easy', 'medium']:
-            file.write(query.strip('\t ;') + '\n')
-            file.flush()
+            pred_file.write(query.strip('\t ;') + '\n')
+            pred_file.flush()
             continue
         if args.zero_shot or args.dynamic_num == 0 or args.encoding == 'question' or args.oracle:
             dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
@@ -84,14 +92,18 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
         if args.two_phase:
             prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, static_shots + dynamic_shots)
-            response = get_response(prompt_phase_1, args)
-            prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, postprocess(response, args.gpt), db_id)
+            if str(i) not in pseudo_queries:
+                response = get_response(prompt_phase_1, args)
+                pseudo_queries[str(i)] = postprocess(response, args.gpt)
+                with open(pseudo_filename, 'w', encoding='utf-8') as pseudo_file:
+                    json.dump(pseudo_queries, pseudo_file, ensure_ascii=False, indent=4)
+            prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_queries[str(i)], db_id)
             response = get_response(prompt_phase_2, args)
         else:
             response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), args)
-        file.write(postprocess(response, args.gpt, db_id) + '\n')
-        file.flush()
-    file.close()
+        pred_file.write(postprocess(response, args.gpt, db_id) + '\n')
+        pred_file.flush()
+    pred_file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)
 
 
