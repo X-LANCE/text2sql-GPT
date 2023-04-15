@@ -26,8 +26,9 @@ def get_response(prompt, args):
             post_data['stop'] = [';']
         while 1:
             try:
-                response = requests.post(url, json=post_data, headers={'llm-token': SPEECH_API_TOKEN})
-                result = json.loads(response.text)['result']
+                response = json.loads(requests.post(url, json=post_data, headers={'llm-token': SPEECH_API_TOKEN}).text)
+                print('Daily left token num:', response['daily_left_token_num'])
+                result = response['result']
                 return result['text'] if isinstance(prompt, str) else result['message']['content']
             except:
                 print('Retrying ...')

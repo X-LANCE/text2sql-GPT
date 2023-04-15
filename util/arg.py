@@ -24,7 +24,6 @@ def main_args():
     arg_parser.add_argument('--speech_api', action='store_true', help='use speech api')
     args = arg_parser.parse_args()
     assert (not args.api_doc) or args.pf == 'no'
-    assert args.encoding == 'query' or (not args.oracle)
     args.log_path = args.gpt
     args.log_path += '__seed_' + str(args.seed)
     args.log_path += '__' + ('api_doc' if args.api_doc else (args.pf + '_pf'))

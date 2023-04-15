@@ -93,8 +93,11 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         if args.two_phase:
             prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, static_shots + dynamic_shots)
             if str(i) not in pseudo_queries:
-                response = get_response(prompt_phase_1, args)
-                pseudo_queries[str(i)] = postprocess(response, args.gpt)
+                if args.oracle:
+                    pseudo_queries[str(i)] = example['pseudo_query']
+                else:
+                    response = get_response(prompt_phase_1, args)
+                    pseudo_queries[str(i)] = postprocess(response, args.gpt)
                 with open(pseudo_filename, 'w', encoding='utf-8') as pseudo_file:
                     json.dump(pseudo_queries, pseudo_file, ensure_ascii=False, indent=4)
             prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_queries[str(i)], db_id)
