@@ -78,6 +78,38 @@ class PromptMaker:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
 
+    def get_prompt_split_problem(self, args, question):
+        if args.gpt in GPT_CHAT_MODELS:
+            return [
+                {'role': 'system', 'content': f'You need to split the problem into exactly {args.subproblem} subproblems.'},
+                {'role': 'user', 'content': 'Problem: ' + question}
+            ]
+        if args.gpt in GPT_COMPLETION_MODELS:
+            return f'Split the problem into exactly {args.subproblem} subproblems: {question}\n1.'
+        raise ValueError(f'unknown GPT model {args.gpt}')
+
+    def get_prompt_merge_subproblems(self, args, db_id, subqa, question):
+        if args.gpt in GPT_CHAT_MODELS:
+            prompt = [
+                {'role': 'system', 'content': 'Given the database schema, you need to translate the question into the SQL query.'},
+                {'role': 'user', 'content': f"Database schema:\n{self.db_prompts[db_id]}\nQuestion: {subqa['q'][0]}"},
+                {'role': 'assistant', 'content': subqa['a'][0]}
+            ]
+            for i in range(1, args.subproblem):
+                prompt.append({'role': 'user', 'content': 'Question: ' + subqa['q'][i]})
+                prompt.append({'role': 'assistant', 'content': subqa['a'][i]})
+            prompt.append({'role': 'user', 'content': 'Now combine the above results and solve the following question: ' + question})
+        elif args.gpt in GPT_COMPLETION_MODELS:
+            prompt = 'Given the database schema:\n' + self.db_prompts[db_id] + '\n'
+            for i in range(args.subproblem):
+                prompt += 'Translate the natural utterance into the SQL query: ' + subqa['q'][i] + '\n'
+                prompt += subqa['a'][i] + '\n'
+            prompt += 'Now combine the above results and translate the following natural utterance into the SQL query: ' + question + '\n'
+            prompt += 'SELECT'
+        else:
+            raise ValueError(f'unknown GPT model {args.gpt}')
+        return prompt
+
     def get_prompt_phase_1(self, args, question=None, shots=[]):
         if args.gpt in GPT_CHAT_MODELS:
             prompt = [{'role': 'system', 'content': 'You need to translate the question into the SQL query.'}]
@@ -182,6 +214,13 @@ if __name__ == '__main__':
     db_id = input('db: ')
     question = 'List all items in the table.'
     pseudo_query = 'SELECT * FROM table'
+    if args.subproblem > 1:
+        subqa = {'q': [], 'a': []}
+        for i in range(args.subproblem):
+            subqa['q'].append('This is the subproblem ' + str(i + 1) + '.')
+            subqa['a'].append('SELECT * FROM table' + str(i + 1))
+        print_prompt(prompt_maker.get_prompt_split_problem(args, question))
+        print_prompt(prompt_maker.get_prompt_merge_subproblems(args, db_id, subqa, question))
     if args.two_phase:
         prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question)
         print_prompt(prompt_phase_1)

@@ -14,6 +14,20 @@ from util.gpt import get_response
 from util.prompt import PromptMaker
 
 
+def load_cached_json_file(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as file:
+            content = json.load(file)
+    else:
+        content = {}
+    return content
+
+
+def save_cached_json_file(filename, content):
+    with open(filename, 'w', encoding='utf-8') as file:
+        json.dump(content, file, ensure_ascii=False, indent=4)
+
+
 def eval_hardness(db_id, sql):
     schema = Schema(get_schema(os.path.join(Example.evaluator.db_dir, db_id, db_id + '.sqlite')))
     return Evaluator().eval_hardness(get_sql(schema, sql))
@@ -24,8 +38,8 @@ def postprocess(response, gpt, db_id=None):
         start_idx = response.find('SELECT')
         if start_idx < 0:
             start_idx = response.find('select')
-        if start_idx < 0:
-            return response
+            if start_idx < 0:
+                return response
         original_sql = response[start_idx:]
         end_idx = original_sql.find('```')
         if end_idx >= 0:
@@ -46,42 +60,13 @@ def postprocess(response, gpt, db_id=None):
 
 
 def decode(train_dataset, dev_dataset, args, etype='all'):
-    prompt_maker = PromptMaker(args=args)
-    static_shots = prompt_maker.get_static_shots(train_dataset, args)
-    if args.encoding == 'query' and (not args.oracle):
-        sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
-    if not os.path.exists(args.log_path):
-        os.makedirs(args.log_path)
-    pred_filename = os.path.join(args.log_path, 'pred.sql')
-    if os.path.exists(pred_filename):
-        with open(pred_filename, 'r', encoding='utf-8') as pred_file:
-            cached = pred_file.read().count('\n')
-        pred_file = open(pred_filename, 'a', encoding='utf-8')
-    else:
-        cached = 0
-        pred_file = open(pred_filename, 'w', encoding='utf-8')
-    if args.two_phase:
-        pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
-        if os.path.exists(pseudo_filename):
-            with open(pseudo_filename, 'r', encoding='utf-8') as pseudo_file:
-                pseudo_queries = json.load(pseudo_file)
-        else:
-            pseudo_queries = {}
-    for i, example in enumerate(dev_dataset):
-        print(f'Decoding example {i} ...')
-        if i < cached:
-            continue
-        db_id = example['db_id']
-        question = example['question']
-        query = example['query']
-        if args.hard_and_extra and eval_hardness(db_id, query) in ['easy', 'medium']:
-            pred_file.write(query.strip('\t ;') + '\n')
-            pred_file.flush()
-            continue
+    def decode_one_example(question, encoding=None):
         if args.zero_shot or args.dynamic_num == 0 or args.encoding == 'question' or args.oracle:
-            dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
+            if encoding is None:
+                encoding = example[args.encoding + '_encoding']
+            dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
         else:
-            response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots), args)
+            response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots), True, args)
             encoding = sentence_encoder.encode(
                 postprocess(response, args.gpt, db_id),
                 batch_size=1,
@@ -96,14 +81,80 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 if args.oracle:
                     pseudo_queries[str(i)] = example['pseudo_query']
                 else:
-                    response = get_response(prompt_phase_1, args)
+                    response = get_response(prompt_phase_1, True, args)
                     pseudo_queries[str(i)] = postprocess(response, args.gpt)
-                with open(pseudo_filename, 'w', encoding='utf-8') as pseudo_file:
-                    json.dump(pseudo_queries, pseudo_file, ensure_ascii=False, indent=4)
+                save_cached_json_file(pseudo_filename, pseudo_queries)
             prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_queries[str(i)], db_id)
-            response = get_response(prompt_phase_2, args)
+            response = get_response(prompt_phase_2, True, args)
         else:
-            response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), args)
+            response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), True, args)
+        return postprocess(response, args.gpt, db_id)
+
+    prompt_maker = PromptMaker(args=args)
+    sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
+    static_shots = prompt_maker.get_static_shots(train_dataset, args)
+    if not os.path.exists(args.log_path):
+        os.makedirs(args.log_path)
+    pred_filename = os.path.join(args.log_path, 'pred.sql')
+    if os.path.exists(pred_filename):
+        with open(pred_filename, 'r', encoding='utf-8') as pred_file:
+            cached = pred_file.read().count('\n')
+        pred_file = open(pred_filename, 'a', encoding='utf-8')
+    else:
+        cached = 0
+        pred_file = open(pred_filename, 'w', encoding='utf-8')
+    if args.subproblem > 1:
+        subqa_filename = os.path.join(args.log_path, 'subqa.json')
+        subqa = load_cached_json_file(subqa_filename)
+    if args.two_phase:
+        pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
+        pseudo_queries = load_cached_json_file(pseudo_filename)
+    for i, example in enumerate(dev_dataset):
+        print(f'Decoding example {i} ...')
+        if i < cached:
+            continue
+        db_id = example['db_id']
+        query = example['query']
+        if args.hard_and_extra and eval_hardness(db_id, query) in ['easy', 'medium']:
+            pred_file.write(query.strip('\t ;') + '\n')
+            pred_file.flush()
+            continue
+        if args.subproblem == 1:
+            pred_file.write(decode_one_example(example['question']) + '\n')
+            pred_file.flush()
+            continue
+        if str(i) not in subqa:
+            subqa[str(i)] = {'q': [], 'a': []}
+            response = get_response(prompt_maker.get_prompt_split_problem(args, example['question']), False, args)
+            if args.gpt in GPT_COMPLETION_MODELS:
+                response = '1. ' + response
+            for j in range(1, args.subproblem + 1):
+                start_idx = response.find(str(j) + '. ')
+                if start_idx < 0:
+                    start_idx = response.find(str(j) + ': ')
+                if start_idx >= 0:
+                    response = response[start_idx + 3:]
+                end_idx = response.find('\n')
+                if end_idx < 0 and j < args.subproblem:
+                    end_idx = response.find(str(j + 1) + '. ')
+                    if end_idx < 0:
+                        end_idx = response.find(str(j + 1) + ': ')
+                if end_idx < 0:
+                    end_idx = len(response)
+                subqa[str(i)]['q'].append(response[:end_idx].strip())
+                response = response[end_idx:]
+            save_cached_json_file(subqa_filename, subqa)
+        for j in range(len(subqa[str(i)]['a']), args.subproblem):
+            encoding = sentence_encoder.encode(
+                subqa[str(i)]['q'][j],
+                batch_size=1,
+                normalize_embeddings=True,
+                convert_to_tensor=True,
+                device=args.device
+            ).cpu().tolist()
+            subqa[str(i)]['a'].append(decode_one_example(subqa[str(i)]['q'][j], encoding))
+            save_cached_json_file(subqa_filename, subqa)
+        response = get_response(prompt_maker.get_prompt_merge_subproblems(args, db_id, subqa[str(i)], example['question']), True, args)
         pred_file.write(postprocess(response, args.gpt, db_id) + '\n')
         pred_file.flush()
     pred_file.close()

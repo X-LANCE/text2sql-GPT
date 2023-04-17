@@ -6,7 +6,7 @@ import time
 from util.constant import SPEECH_API_TOKEN
 
 
-def get_response(prompt, args):
+def get_response(prompt, get_sql, args):
     if args.speech_api:
         post_data = {
             'model': args.gpt,
@@ -19,11 +19,11 @@ def get_response(prompt, args):
         if isinstance(prompt, str):
             url = 'http://54.193.55.85:10030/v1/completions?use_cache=false'
             post_data['prompt'] = prompt
-            post_data['stop'] = [';', '\n\n', 'Given', 'Translate']
+            post_data['stop'] = [';', '\n\n', 'Given', 'Translate'] if get_sql else None
         else:
             url = 'http://54.193.55.85:10030/v1/completions/chat?use_cache=false'
             post_data['messages'] = prompt
-            post_data['stop'] = [';']
+            post_data['stop'] = [';'] if get_sql else None
         while 1:
             try:
                 response = json.loads(requests.post(url, json=post_data, headers={'llm-token': SPEECH_API_TOKEN}).text)
@@ -45,7 +45,7 @@ def get_response(prompt, args):
                     top_p=1,
                     frequency_penalty=0,
                     presence_penalty=0,
-                    stop=[';', '\n\n', 'Given', 'Translate']
+                    stop=[';', '\n\n', 'Given', 'Translate'] if get_sql else None
                 )
                 return response['choices'][0]['text']
             except:
@@ -61,7 +61,7 @@ def get_response(prompt, args):
                     top_p=1,
                     frequency_penalty=0,
                     presence_penalty=0,
-                    stop=[';']
+                    stop=[';'] if get_sql else None
                 )
                 return response['choices'][0]['message']['content']
             except:
