@@ -54,13 +54,20 @@ class PromptMaker:
                     self.db_prompts[db_id] += '*/\n'
             self.db_prompts[db_id] = self.db_prompts[db_id][:-1]
 
-    def get_prompt(self, args, db_id=None, question=None, shots=[]):
+    def get_prompt(self, args, db_id=None, question=None, shots=[], subqa=None):
         if args.gpt in GPT_CHAT_MODELS:
             prompt = [{'role': 'system', 'content': 'Given the database schema, you need to translate the question into the SQL query.'}]
             for shot in shots:
                 prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']]}\nQuestion: {shot['question']}"})
                 prompt.append({'role': 'assistant', 'content': shot['query']})
-            if db_id and question:
+            if subqa:
+                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[db_id]}\nQuestion: {subqa['q'][0]}"})
+                prompt.append({'role': 'assistant', 'content': subqa['a'][0]})
+                for i in range(1, args.subproblem):
+                    prompt.append({'role': 'user', 'content': 'Question: ' + subqa['q'][i]})
+                    prompt.append({'role': 'assistant', 'content': subqa['a'][i]})
+                prompt.append({'role': 'user', 'content': 'Now combine the above results and solve the following question: ' + question})
+            elif db_id and question:
                 prompt.append({'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id]}\nQuestion: {question}'})
         elif args.gpt in GPT_COMPLETION_MODELS:
             prompt = ''
@@ -69,7 +76,14 @@ class PromptMaker:
                 prompt += self.db_prompts[shot['db_id']] + '\n'
                 prompt += 'Translate the natural utterance into the SQL query: ' + shot['question'] + '\n'
                 prompt += shot['query'] + '\n'
-            if db_id and question:
+            if subqa:
+                prompt = 'Given the database schema:\n' + self.db_prompts[db_id] + '\n'
+                for i in range(args.subproblem):
+                    prompt += 'Translate the natural utterance into the SQL query: ' + subqa['q'][i] + '\n'
+                    prompt += subqa['a'][i] + '\n'
+                prompt += 'Now combine the above results and translate the following natural utterance into the SQL query: ' + question + '\n'
+                prompt += 'SELECT'
+            elif db_id and question:
                 prompt += 'Given the database schema:\n'
                 prompt += self.db_prompts[db_id] + '\n'
                 prompt += 'Translate the natural utterance into the SQL query: ' + question + '\n'
@@ -88,27 +102,18 @@ class PromptMaker:
             return f'Split the problem into exactly {args.subproblem} subproblems: {question}\n1.'
         raise ValueError(f'unknown GPT model {args.gpt}')
 
-    def get_prompt_merge_subproblems(self, args, db_id, subqa, question):
+    def get_prompt_remove_context_dependency(self, args, subproblems):
+        content = ''
+        for i, subproblem in enumerate(subproblems):
+            content += str(i + 1) + '. ' + subproblem + '\n'
         if args.gpt in GPT_CHAT_MODELS:
-            prompt = [
-                {'role': 'system', 'content': 'Given the database schema, you need to translate the question into the SQL query.'},
-                {'role': 'user', 'content': f"Database schema:\n{self.db_prompts[db_id]}\nQuestion: {subqa['q'][0]}"},
-                {'role': 'assistant', 'content': subqa['a'][0]}
+            return [
+                {'role': 'system', 'content': 'You need to rewrite the second sentence to remove the context dependency between 2 sentences.'},
+                {'role': 'user', 'content': content.strip()}
             ]
-            for i in range(1, args.subproblem):
-                prompt.append({'role': 'user', 'content': 'Question: ' + subqa['q'][i]})
-                prompt.append({'role': 'assistant', 'content': subqa['a'][i]})
-            prompt.append({'role': 'user', 'content': 'Now combine the above results and solve the following question: ' + question})
-        elif args.gpt in GPT_COMPLETION_MODELS:
-            prompt = 'Given the database schema:\n' + self.db_prompts[db_id] + '\n'
-            for i in range(args.subproblem):
-                prompt += 'Translate the natural utterance into the SQL query: ' + subqa['q'][i] + '\n'
-                prompt += subqa['a'][i] + '\n'
-            prompt += 'Now combine the above results and translate the following natural utterance into the SQL query: ' + question + '\n'
-            prompt += 'SELECT'
-        else:
-            raise ValueError(f'unknown GPT model {args.gpt}')
-        return prompt
+        if args.gpt in GPT_COMPLETION_MODELS:
+            return 'Rewrite the second sentence to remove the context dependency between 2 sentences:\n' + content + 'Result:'
+        raise ValueError(f'unknown GPT model {args.gpt}')
 
     def get_prompt_phase_1(self, args, question=None, shots=[]):
         if args.gpt in GPT_CHAT_MODELS:
@@ -220,8 +225,9 @@ if __name__ == '__main__':
             subqa['q'].append('This is the subproblem ' + str(i + 1) + '.')
             subqa['a'].append('SELECT * FROM table' + str(i + 1))
         print_prompt(prompt_maker.get_prompt_split_problem(args, question))
-        print_prompt(prompt_maker.get_prompt_merge_subproblems(args, db_id, subqa, question))
-    if args.two_phase:
+        print_prompt(prompt_maker.get_prompt_remove_context_dependency(args, subqa['q']))
+        print_prompt(prompt_maker.get_prompt(args, db_id, question, subqa=subqa))
+    elif args.two_phase:
         prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question)
         print_prompt(prompt_phase_1)
         prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_query, db_id)

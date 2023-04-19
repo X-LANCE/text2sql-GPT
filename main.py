@@ -75,7 +75,9 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 device=args.device
             ).cpu().tolist()
             dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
-        if args.two_phase:
+        if args.subproblem > 1 and len(subqa[str(i)]['a']) == args.subproblem:
+            response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots, subqa[str(i)]), True, args)
+        elif args.two_phase:
             prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, static_shots + dynamic_shots)
             if str(i) not in pseudo_queries:
                 if args.oracle:
@@ -124,7 +126,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             pred_file.flush()
             continue
         if str(i) not in subqa:
-            subqa[str(i)] = {'q': [], 'a': []}
+            subqa[str(i)] = {'q_raw': [], 'q': [], 'a': []}
             response = get_response(prompt_maker.get_prompt_split_problem(args, example['question']), False, args)
             if args.gpt in GPT_COMPLETION_MODELS:
                 response = '1. ' + response
@@ -141,8 +143,16 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                         end_idx = response.find(str(j + 1) + ': ')
                 if end_idx < 0:
                     end_idx = len(response)
-                subqa[str(i)]['q'].append(response[:end_idx].strip())
+                subqa[str(i)]['q_raw'].append(response[:end_idx].strip())
                 response = response[end_idx:]
+            save_cached_json_file(subqa_filename, subqa)
+        if args.subproblem == 2 and len(subqa[str(i)]['q']) == 0:
+            response = get_response(prompt_maker.get_prompt_remove_context_dependency(args, subqa[str(i)]['q_raw']), False, args)
+            start_idx = response.find('2. ')
+            if start_idx >= 0:
+                response = response[start_idx + 3:]
+            subqa[str(i)]['q'].append(subqa[str(i)]['q_raw'][0])
+            subqa[str(i)]['q'].append(response.strip())
             save_cached_json_file(subqa_filename, subqa)
         for j in range(len(subqa[str(i)]['a']), args.subproblem):
             encoding = sentence_encoder.encode(
@@ -154,8 +164,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             ).cpu().tolist()
             subqa[str(i)]['a'].append(decode_one_example(subqa[str(i)]['q'][j], encoding))
             save_cached_json_file(subqa_filename, subqa)
-        response = get_response(prompt_maker.get_prompt_merge_subproblems(args, db_id, subqa[str(i)], example['question']), True, args)
-        pred_file.write(postprocess(response, args.gpt, db_id) + '\n')
+        pred_file.write(decode_one_example(example['question']) + '\n')
         pred_file.flush()
     pred_file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)
