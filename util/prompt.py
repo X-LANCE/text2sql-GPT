@@ -17,103 +17,78 @@ class PromptMaker:
             db_id = db['db_id']
             tabs = db['table_names_original']
             cols = db['column_names_original']
-            self.db_prompts[db_id] = ''
-            for i in range(len(tabs)):
-                if args.api_doc:
-                    self.db_prompts[db_id] += f"# {tabs[i]}({', '.join(col[1] for col in cols if col[0] == i)})\n"
-                else:
-                    self.db_prompts[db_id] += f'create table {tabs[i]} (\n'
-                    for j in range(len(cols)):
-                        if cols[j][0] == i:
-                            self.db_prompts[db_id] += f"    {cols[j][1]} {db['column_types'][j]}"
-                            if args.pf == 'eoc':
-                                if j in db['primary_keys']:
-                                    self.db_prompts[db_id] += ' primary key'
-                                for fk in db['foreign_keys']:
-                                    if fk[0] == j:
-                                        self.db_prompts[db_id] += f' references {tabs[cols[fk[1]][0]]}({cols[fk[1]][1]})'
-                            self.db_prompts[db_id] += ',\n'
-                    if args.pf == 'eot':
-                        pks = [cols[pk][1] for pk in db['primary_keys'] if cols[pk][0] == i]
-                        if len(pks) > 0:
-                            self.db_prompts[db_id] += f"    primary key ({', '.join(pks)}),\n"
-                        for fk in db['foreign_keys']:
-                            if cols[fk[0]][0] == i:
-                                self.db_prompts[db_id] += f'    foreign key ({cols[fk[0]][1]}) references {tabs[cols[fk[1]][0]]}({cols[fk[1]][1]}),\n'
-                    self.db_prompts[db_id] = self.db_prompts[db_id][:-2] + '\n)\n'
-                if args.content > 0:
-                    conn = sqlite3.connect(os.path.join('data', args.dataset, 'database', db_id, db_id + '.sqlite'))
-                    conn.row_factory = dict_factory
-                    cursor = conn.cursor()
-                    db_contents = cursor.execute(f'SELECT * FROM {tabs[i]} LIMIT {args.content}').fetchall()
-                    self.db_prompts[db_id] += '/*\n'
-                    self.db_prompts[db_id] += f"{len(db_contents)} example row{'s' if len(db_contents) > 1 else ''} from table {tabs[i]}:\n"
-                    self.db_prompts[db_id] += '\t'.join([col[1] for col in cols if col[0] == i]) + '\n'
-                    for record in db_contents:
-                        self.db_prompts[db_id] += '\t'.join([str(record[col[1]]) for col in cols if col[0] == i]) + '\n'
-                    self.db_prompts[db_id] += '*/\n'
-            self.db_prompts[db_id] = self.db_prompts[db_id][:-1]
+            self.db_prompts[db_id] = [''] * (args.content + 1)
+            for c_num in range(args.content + 1):
+                for i in range(len(tabs)):
+                    if args.api_doc:
+                        self.db_prompts[db_id][c_num] += f"# {tabs[i]}({', '.join(col[1] for col in cols if col[0] == i)})\n"
+                    else:
+                        self.db_prompts[db_id][c_num] += f'create table {tabs[i]} (\n'
+                        for j in range(len(cols)):
+                            if cols[j][0] == i:
+                                self.db_prompts[db_id][c_num] += f"    {cols[j][1]} {db['column_types'][j]}"
+                                if args.pf == 'eoc':
+                                    if j in db['primary_keys']:
+                                        self.db_prompts[db_id][c_num] += ' primary key'
+                                    for fk in db['foreign_keys']:
+                                        if fk[0] == j:
+                                            self.db_prompts[db_id][c_num] += f' references {tabs[cols[fk[1]][0]]}({cols[fk[1]][1]})'
+                                self.db_prompts[db_id][c_num] += ',\n'
+                        if args.pf == 'eot':
+                            pks = [cols[pk][1] for pk in db['primary_keys'] if cols[pk][0] == i]
+                            if len(pks) > 0:
+                                self.db_prompts[db_id][c_num] += f"    primary key ({', '.join(pks)}),\n"
+                            for fk in db['foreign_keys']:
+                                if cols[fk[0]][0] == i:
+                                    self.db_prompts[db_id][c_num] += f'    foreign key ({cols[fk[0]][1]}) references {tabs[cols[fk[1]][0]]}({cols[fk[1]][1]}),\n'
+                        self.db_prompts[db_id][c_num] = self.db_prompts[db_id][c_num][:-2] + '\n)\n'
+                    if c_num > 0:
+                        conn = sqlite3.connect(os.path.join('data', args.dataset, 'database', db_id, db_id + '.sqlite'))
+                        conn.row_factory = dict_factory
+                        cursor = conn.cursor()
+                        db_contents = cursor.execute(f'SELECT * FROM {tabs[i]} LIMIT {c_num}').fetchall()
+                        self.db_prompts[db_id][c_num] += '/*\n'
+                        self.db_prompts[db_id][c_num] += f"{len(db_contents)} example row{'s' if len(db_contents) > 1 else ''} from table {tabs[i]}:\n"
+                        self.db_prompts[db_id][c_num] += '\t'.join([col[1] for col in cols if col[0] == i]) + '\n'
+                        for record in db_contents:
+                            self.db_prompts[db_id][c_num] += '\t'.join([str(record[col[1]]) for col in cols if col[0] == i]) + '\n'
+                        self.db_prompts[db_id][c_num] += '*/\n'
+                self.db_prompts[db_id][c_num] = self.db_prompts[db_id][c_num][:-1]
 
-    def get_prompt(self, args, db_id=None, question=None, shots=[], subqa=None):
+    def get_prompt(self, args, db_id=None, question=None, shots=[], c_num=-1):
+        if c_num < 0:
+            c_num = args.content
         if args.gpt in GPT_CHAT_MODELS:
             prompt = [{'role': 'system', 'content': 'Given the database schema, you need to translate the question into the SQL query.'}]
             for shot in shots:
-                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']]}\nQuestion: {shot['question']}"})
-                prompt.append({'role': 'assistant', 'content': shot['query']})
-            if subqa:
-                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[db_id]}\nQuestion: {subqa['q'][0]}"})
-                prompt.append({'role': 'assistant', 'content': subqa['a'][0]})
-                for i in range(1, args.subproblem):
-                    prompt.append({'role': 'user', 'content': 'Question: ' + subqa['q'][i]})
-                    prompt.append({'role': 'assistant', 'content': subqa['a'][i]})
-                prompt.append({'role': 'user', 'content': 'Now combine the above results and solve the following question: ' + question})
-            elif db_id and question:
-                prompt.append({'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id]}\nQuestion: {question}'})
+                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']][c_num]}\nQuestion: {shot['question']}"})
+                if 'cot' in shot:
+                    prompt.append({'role': 'assistant', 'content': shot['cot']})
+                else:
+                    prompt.append({'role': 'assistant', 'content': shot['query']})
+            if db_id and question:
+                prompt.append({'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][c_num]}\nQuestion: {question}'})
         elif args.gpt in GPT_COMPLETION_MODELS:
             prompt = ''
             for shot in shots:
                 prompt += 'Given the database schema:\n'
-                prompt += self.db_prompts[shot['db_id']] + '\n'
+                prompt += self.db_prompts[shot['db_id']][c_num] + '\n'
                 prompt += 'Translate the natural utterance into the SQL query: ' + shot['question'] + '\n'
-                prompt += shot['query'] + '\n'
-            if subqa:
-                prompt = 'Given the database schema:\n' + self.db_prompts[db_id] + '\n'
-                for i in range(args.subproblem):
-                    prompt += 'Translate the natural utterance into the SQL query: ' + subqa['q'][i] + '\n'
-                    prompt += subqa['a'][i] + '\n'
-                prompt += 'Now combine the above results and translate the following natural utterance into the SQL query: ' + question + '\n'
-                prompt += 'SELECT'
-            elif db_id and question:
+                if 'cot' in shot:
+                    prompt += shot['cot'] + '\n'
+                else:
+                    prompt += shot['query'] + '\n'
+            if db_id and question:
                 prompt += 'Given the database schema:\n'
-                prompt += self.db_prompts[db_id] + '\n'
+                prompt += self.db_prompts[db_id][c_num] + '\n'
                 prompt += 'Translate the natural utterance into the SQL query: ' + question + '\n'
-                prompt += 'SELECT'
+                if args.labeled_shot:
+                    prompt += "Let's think step by step."
+                else:
+                    prompt += 'SELECT'
         else:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
-
-    def get_prompt_split_problem(self, args, question):
-        if args.gpt in GPT_CHAT_MODELS:
-            return [
-                {'role': 'system', 'content': f'You need to split the problem into exactly {args.subproblem} subproblems.'},
-                {'role': 'user', 'content': 'Problem: ' + question}
-            ]
-        if args.gpt in GPT_COMPLETION_MODELS:
-            return f'Split the problem into exactly {args.subproblem} subproblems: {question}\n1.'
-        raise ValueError(f'unknown GPT model {args.gpt}')
-
-    def get_prompt_remove_context_dependency(self, args, subproblems):
-        content = ''
-        for i, subproblem in enumerate(subproblems):
-            content += str(i + 1) + '. ' + subproblem + '\n'
-        if args.gpt in GPT_CHAT_MODELS:
-            return [
-                {'role': 'system', 'content': 'You need to rewrite the second sentence to remove the context dependency between 2 sentences.'},
-                {'role': 'user', 'content': content.strip()}
-            ]
-        if args.gpt in GPT_COMPLETION_MODELS:
-            return 'Rewrite the second sentence to remove the context dependency between 2 sentences:\n' + content + 'Result:'
-        raise ValueError(f'unknown GPT model {args.gpt}')
 
     def get_prompt_phase_1(self, args, question=None, shots=[]):
         if args.gpt in GPT_CHAT_MODELS:
@@ -121,7 +96,7 @@ class PromptMaker:
             for shot in shots:
                 prompt.append({'role': 'user', 'content': shot['question']})
                 prompt.append({'role': 'assistant', 'content': shot['pseudo_query']})
-                prompt.append({'role': 'user', 'content': f"Now given the database schema:\n{self.db_prompts[shot['db_id']]}\nCorrect your answer."})
+                prompt.append({'role': 'user', 'content': f"Now given the database schema:\n{self.db_prompts[shot['db_id']][args.content]}\nCorrect your answer."})
                 prompt.append({'role': 'assistant', 'content': shot['query']})
             if question:
                 prompt.append({'role': 'user', 'content': question})
@@ -131,7 +106,7 @@ class PromptMaker:
                 prompt += 'Translate the natural utterance into the SQL query: ' + shot['question'] + '\n'
                 prompt += shot['pseudo_query'] + '\n'
                 prompt += 'Now given the database schema:\n'
-                prompt += self.db_prompts[shot['db_id']] + '\n'
+                prompt += self.db_prompts[shot['db_id']][args.content] + '\n'
                 prompt += 'Correct your answer.\n'
                 prompt += shot['query'] + '\n'
             if question:
@@ -144,14 +119,14 @@ class PromptMaker:
         prompt = previous_prompt
         if isinstance(prompt, list):
             prompt.append({'role': 'assistant', 'content': pseudo_query})
-            prompt.append({'role': 'user', 'content': f'Now given the database schema:\n{self.db_prompts[db_id]}\nCorrect your answer.'})
+            prompt.append({'role': 'user', 'content': f'Now given the database schema:\n{self.db_prompts[db_id][args.content]}\nCorrect your answer.'})
         else:
             assert prompt[-6:] == 'SELECT'
             prompt = prompt[:-6]
             assert prompt[-1] == '\n'
             prompt += pseudo_query + '\n'
             prompt += 'Now given the database schema:\n'
-            prompt += self.db_prompts[db_id] + '\n'
+            prompt += self.db_prompts[db_id][args.content] + '\n'
             prompt += 'Correct your answer.\n'
             prompt += 'SELECT'
         return prompt
@@ -219,15 +194,7 @@ if __name__ == '__main__':
     db_id = input('db: ')
     question = 'List all items in the table.'
     pseudo_query = 'SELECT * FROM table'
-    if args.subproblem > 1:
-        subqa = {'q': [], 'a': []}
-        for i in range(args.subproblem):
-            subqa['q'].append('This is the subproblem ' + str(i + 1) + '.')
-            subqa['a'].append('SELECT * FROM table' + str(i + 1))
-        print_prompt(prompt_maker.get_prompt_split_problem(args, question))
-        print_prompt(prompt_maker.get_prompt_remove_context_dependency(args, subqa['q']))
-        print_prompt(prompt_maker.get_prompt(args, db_id, question, subqa=subqa))
-    elif args.two_phase:
+    if args.two_phase:
         prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question)
         print_prompt(prompt_phase_1)
         prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_query, db_id)
