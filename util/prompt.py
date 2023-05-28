@@ -62,7 +62,7 @@ class PromptMaker:
             prompt = [{'role': 'system', 'content': 'Given the database schema, you need to translate the question into the SQL query.'}]
             for shot in shots:
                 prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']][c_num]}\nQuestion: {shot['question']}"})
-                if 'cot' in shot:
+                if args.cot:
                     prompt.append({'role': 'assistant', 'content': shot['cot']})
                 else:
                     prompt.append({'role': 'assistant', 'content': shot['query']})
@@ -74,7 +74,7 @@ class PromptMaker:
                 prompt += 'Given the database schema:\n'
                 prompt += self.db_prompts[shot['db_id']][c_num] + '\n'
                 prompt += 'Translate the natural utterance into the SQL query: ' + shot['question'] + '\n'
-                if 'cot' in shot:
+                if args.cot:
                     prompt += shot['cot'] + '\n'
                 else:
                     prompt += shot['query'] + '\n'

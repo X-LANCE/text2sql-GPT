@@ -34,7 +34,7 @@ def eval_hardness(db_id, sql):
 
 
 def postprocess(response, args, db_id=None):
-    if args.labeled_shot:
+    if args.cot:
         original_sql = response.split('\n')[-1]
     else:
         if args.gpt in GPT_CHAT_MODELS:
@@ -65,11 +65,10 @@ def postprocess(response, args, db_id=None):
 def decode(train_dataset, dev_dataset, args, etype='all'):
     prompt_maker = PromptMaker(args=args)
     sentence_encoder = SentenceTransformer(os.path.join('plm', args.plm))
-    static_shots = prompt_maker.get_static_shots(train_dataset, args)
     if args.labeled_shot:
         labeled_shots = load_cached_json_file(os.path.join(args.log_path, 'shot.json'))
-        cot_filename = os.path.join(args.log_path, 'cot.json')
-        cots = load_cached_json_file(cot_filename)
+    else:
+        static_shots = prompt_maker.get_static_shots(train_dataset, args)
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
     pred_filename = os.path.join(args.log_path, 'pred.sql')
@@ -80,6 +79,9 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
     else:
         cached = 0
         pred_file = open(pred_filename, 'w', encoding='utf-8')
+    if args.cot:
+        cot_filename = os.path.join(args.log_path, 'cot.json')
+        cots = load_cached_json_file(cot_filename)
     if args.two_phase:
         pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
         pseudo_queries = load_cached_json_file(pseudo_filename)
@@ -95,13 +97,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             pred_file.flush()
             continue
         if args.labeled_shot:
-            cots[str(i)] = {'c_num': args.content + 1}
-            response = None
-            while response is None:
-                cots[str(i)]['c_num'] -= 1
-                response = get_response(prompt_maker.get_prompt(args, db_id, question, labeled_shots, cots[str(i)]['c_num']), args)
-            cots[str(i)]['cot'] = response
-            save_cached_json_file(cot_filename, cots)
+            shots = labeled_shots
         else:
             if args.zero_shot or args.dynamic_num == 0 or args.encoding == 'question' or args.oracle:
                 dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
@@ -115,19 +111,28 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                     device=args.device
                 ).cpu().tolist()
                 dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
-            if args.two_phase:
-                prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, static_shots + dynamic_shots)
-                if str(i) not in pseudo_queries:
-                    if args.oracle:
-                        pseudo_queries[str(i)] = example['pseudo_query']
-                    else:
-                        response = get_response(prompt_phase_1, args)
-                        pseudo_queries[str(i)] = postprocess(response, args)
-                    save_cached_json_file(pseudo_filename, pseudo_queries)
-                prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_queries[str(i)], db_id)
-                response = get_response(prompt_phase_2, args)
-            else:
-                response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots + dynamic_shots), args)
+            shots = static_shots + dynamic_shots
+        if args.cot:
+            cots[str(i)] = {'c_num': args.content + 1}
+            response = None
+            while response is None:
+                cots[str(i)]['c_num'] -= 1
+                response = get_response(prompt_maker.get_prompt(args, db_id, question, shots, cots[str(i)]['c_num']), args)
+            cots[str(i)]['cot'] = response
+            save_cached_json_file(cot_filename, cots)
+        elif args.two_phase:
+            prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, shots)
+            if str(i) not in pseudo_queries:
+                if args.oracle:
+                    pseudo_queries[str(i)] = example['pseudo_query']
+                else:
+                    response = get_response(prompt_phase_1, args)
+                    pseudo_queries[str(i)] = postprocess(response, args)
+                save_cached_json_file(pseudo_filename, pseudo_queries)
+            prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_queries[str(i)], db_id)
+            response = get_response(prompt_phase_2, args)
+        else:
+            response = get_response(prompt_maker.get_prompt(args, db_id, question, shots), args)
         pred_file.write(postprocess(response, args, db_id) + '\n')
         pred_file.flush()
     pred_file.close()
