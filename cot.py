@@ -43,14 +43,17 @@ def get_columns_in_sql(sql, db):
 
 
 def get_columns_in_sql_unit(sql_unit, db):
-    columns = get_columns_in_val_units([val_unit[1] for val_unit in sql_unit['select'][1]], db)
+    columns = set()
+    for val_unit in sql_unit['select'][1]:
+        columns.update(get_columns_in_val_unit(val_unit[1], db))
     for table_unit in sql_unit['from']['table_units']:
         if table_unit[0] == 'sql':
             columns.update(get_columns_in_sql(table_unit[1], db))
     columns.update(get_columns_in_conds(sql_unit['where'][::2], db))
     columns.update(get_columns_in_conds(sql_unit['having'][::2], db))
     if sql_unit['orderBy']:
-        columns.update(get_columns_in_val_units(sql_unit['orderBy'][1], db))
+        for val_unit in sql_unit['orderBy'][1]:
+            columns.update(get_columns_in_val_unit(val_unit, db))
     return columns
 
 
@@ -63,13 +66,6 @@ def get_columns_in_conds(conds, db):
         elif isinstance(cond[3], list):
             columns.update(get_columns_in_col_unit(cond[3], db))
     return columns
-
-
-def get_columns_in_val_units(val_units, db):
-    columns = set()
-    for val_unit in val_units:
-        columns.update(get_columns_in_val_unit(val_unit, db))
-    return {', '.join(columns)} if columns else set()
 
 
 def get_columns_in_val_unit(val_unit, db):
