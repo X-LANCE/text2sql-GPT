@@ -20,6 +20,9 @@ def main_args():
     arg_parser.add_argument('--dynamic_num', default=2, type=int, help='number of dynamic shots')
     arg_parser.add_argument('--encoding', default='question', type=str, choices=['question', 'query'], help='according to question or query encoding')
     arg_parser.add_argument('--cot', action='store_true', help='use chain of thought')
+    arg_parser.add_argument('--tot', action='store_true', help='use tree of thought')
+    arg_parser.add_argument('--tot_k', default=3, type=int, help='k for tree of thought')
+    arg_parser.add_argument('--tot_b', default=1, type=int, help='b for tree of thought')
     arg_parser.add_argument('--oracle', action='store_true', help='given queries in the dev dataset')
     arg_parser.add_argument('--two_phase', action='store_true', help='use two phase method')
     arg_parser.add_argument('--hard_and_extra', action='store_true', help='only test hard and extra hard examples')
@@ -27,6 +30,7 @@ def main_args():
     args = arg_parser.parse_args()
     assert (not args.api_doc) or args.pf == 'no'
     assert not (args.zero_shot and args.labeled_shot)
+    assert not (args.cot and args.tot)
     args.device = 'cpu' if args.device < 0 else f'cuda:{args.device}'
     args.log_path = args.gpt
     args.log_path += '__seed_' + str(args.seed)
@@ -41,6 +45,9 @@ def main_args():
         args.log_path += '__encoding_' + args.encoding
     if args.cot:
         args.log_path += '__cot'
+    elif args.tot:
+        args.log_path += '__tot_k_' + str(args.tot_k)
+        args.log_path += '__tot_b_' + str(args.tot_b)
     if args.oracle:
         args.log_path += '__oracle'
     if args.two_phase:
@@ -73,4 +80,11 @@ def cot_args():
     arg_parser.add_argument('--device', default=0, type=int, help='gpu id (-1 represents cpu)')
     args = arg_parser.parse_args()
     args.device = 'cpu' if args.device < 0 else f'cuda:{args.device}'
+    return args
+
+
+def tot_args():
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('--dataset', default='spider', type=str, help='dataset name')
+    args = arg_parser.parse_args()
     return args

@@ -6,13 +6,13 @@ import time
 from util.constant import SPEECH_API_TOKEN
 
 
-def get_response(prompt, args):
-    max_tokens = 750 if args.labeled_shot else 150
+def get_response(prompt, args, temperature=0):
+    max_tokens = 750 if args.cot else 150
     if args.speech_api:
         post_data = {
             'model': args.gpt,
             'max_tokens': max_tokens,
-            'temperature': 0,
+            'temperature': temperature,
             'top_p': 1,
             'frequency_penalty': 0,
             'presence_penalty': 0
@@ -41,7 +41,7 @@ def get_response(prompt, args):
                     model=args.gpt,
                     prompt=prompt,
                     max_tokens=max_tokens,
-                    temperature=0,
+                    temperature=temperature,
                     top_p=1,
                     frequency_penalty=0,
                     presence_penalty=0,
@@ -59,7 +59,7 @@ def get_response(prompt, args):
                     model=args.gpt,
                     messages=prompt,
                     max_tokens=max_tokens,
-                    temperature=0,
+                    temperature=temperature,
                     top_p=1,
                     frequency_penalty=0,
                     presence_penalty=0

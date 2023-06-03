@@ -7,7 +7,7 @@ from eval.evaluation import Evaluator, isValidSQL
 from eval.process_sql import Schema, get_schema, get_sql
 from sentence_transformers import SentenceTransformer
 from util.arg import main_args
-from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS
+from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, TOT_CLAUSES, TOT_INSTRUCTIONS, TOT_IUE_INSTRUCTIONS
 from util.encode import encode_dataset
 from util.example import Example
 from util.gpt import get_response
@@ -69,6 +69,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         labeled_shots = load_cached_json_file(os.path.join(args.log_path, 'shot.json'))
     else:
         static_shots = prompt_maker.get_static_shots(train_dataset, args)
+        static_iue_shots = prompt_maker.get_static_shots(train_dataset, args, True)
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
     pred_filename = os.path.join(args.log_path, 'pred.sql')
@@ -101,6 +102,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         else:
             if args.zero_shot or args.dynamic_num == 0 or args.encoding == 'question' or args.oracle:
                 dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
+                dynamic_iue_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args, True)
             else:
                 response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots), args)
                 encoding = sentence_encoder.encode(
@@ -111,6 +113,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                     device=args.device
                 ).cpu().tolist()
                 dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
+                dynamic_iue_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args, True)
             shots = static_shots + dynamic_shots
         if args.cot:
             cots[str(i)] = {'c_num': args.content + 1}
@@ -120,6 +123,26 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 response = get_response(prompt_maker.get_prompt(args, db_id, question, shots, cots[str(i)]['c_num']), args)
             cots[str(i)]['cot'] = response
             save_cached_json_file(cot_filename, cots)
+            pred_file.write(postprocess(response, args, db_id) + '\n')
+        elif args.tot:
+            prev_results = [{'db_id': db_id, 'question': question}]
+            prev_results[0]['iue'] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, 0, prev_results[0], static_iue_shots + dynamic_shots), args)
+            for step in range(1, len(TOT_INSTRUCTIONS)):
+                cur_results = []
+                for prev_result in prev_results:
+                    for _ in range(args.tot_k):
+                        cur_results.append(prev_result)
+                        cur_results[-1][TOT_CLAUSES[step]] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, 0.1)
+                response = get_response(prompt_maker.get_prompt_tot_evaluate(args, cur_results, args.tot_b if step < len(TOT_INSTRUCTIONS) - 1 else 1), args)
+                prev_results = [cur_results[int(k)] for k in response.split()]
+            sql = prev_results[0]['tot_select'] + ' ' + prev_results[0]['tot_from']
+            if prev_results[0]['tot_where'].startwith('WHERE '):
+                sql += ' ' + prev_results[0]['WHERE']
+            if prev_results[0]['tot_group_by'].startswith('GROUP BY '):
+                sql += ' ' + prev_results[0]['tot_group_by']
+            if prev_results[0]['tot_order_by'].startswith('ORDER BY '):
+                sql += ' ' + prev_results[0]['tot_order_by']
+            pred_file.write(sql + '\n')
         elif args.two_phase:
             prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, shots)
             if str(i) not in pseudo_queries:
@@ -131,9 +154,10 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 save_cached_json_file(pseudo_filename, pseudo_queries)
             prompt_phase_2 = prompt_maker.get_prompt_phase_2(prompt_phase_1, pseudo_queries[str(i)], db_id)
             response = get_response(prompt_phase_2, args)
+            pred_file.write(postprocess(response, args, db_id) + '\n')
         else:
             response = get_response(prompt_maker.get_prompt(args, db_id, question, shots), args)
-        pred_file.write(postprocess(response, args, db_id) + '\n')
+            pred_file.write(postprocess(response, args, db_id) + '\n')
         pred_file.flush()
     pred_file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)

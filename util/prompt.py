@@ -5,7 +5,7 @@ import json
 import random
 import sqlite3
 from sentence_transformers import util
-from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS
+from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, SET_OPS, TOT_CLAUSES
 
 
 class PromptMaker:
@@ -82,10 +82,64 @@ class PromptMaker:
                 prompt += 'Given the database schema:\n'
                 prompt += self.db_prompts[db_id][c_num] + '\n'
                 prompt += 'Translate the natural utterance into the SQL query: ' + question + '\n'
-                if args.labeled_shot:
+                if args.cot:
                     prompt += "Let's think step by step."
                 else:
                     prompt += 'SELECT'
+        else:
+            raise ValueError(f'unknown GPT model {args.gpt}')
+        return prompt
+
+    def get_prompt_tot_generate(self, args, instructions, step, prev_result, shots=[]):
+        def add_item(item):
+            content = f"Database schema:\n{self.db_prompts[item['db_id']][args.content]}\nQuestion: {item['question']}"
+            if step > 1:
+                content += '\nSELECT clause: ' + item['tot_select']
+            if step > 2:
+                content += '\nWHERE clause: ' + item['tot_where']
+            if step > 3:
+                content += '\nGROUP BY clause: ' + item['tot_group_by']
+            if step > 4:
+                content += '\nORDER BY clause: ' + item['tot_order_by']
+            if args.gpt in GPT_CHAT_MODELS:
+                prompt.append({'role': 'user', 'content': content})
+                if TOT_CLAUSES[step] in item:
+                    prompt.append({'role': 'assistant', 'content': item[TOT_CLAUSES[step]]})
+            elif args.gpt in GPT_COMPLETION_MODELS:
+                pass
+
+        if args.gpt in GPT_CHAT_MODELS:
+            prompt = [{'role': 'system', 'content': instructions[step]}]
+        elif args.gpt in GPT_COMPLETION_MODELS:
+            prompt = ''
+        else:
+            raise ValueError(f'unknown GPT model {args.gpt}')
+        for shot in shots:
+            add_item(shot)
+        add_item(prev_result)
+        return prompt
+
+    def get_prompt_tot_evaluate(self, args, cur_results, beam_size):
+        db_id, question, sqls = cur_results[0]['db_id'], cur_results[0]['question'], []
+        for i, cur_result in enumerate(cur_results):
+            sql = cur_result['tot_select']
+            if 'tot_from' in cur_result:
+                sql += ' ' + cur_result['tot_from']
+            if 'tot_where' in cur_result and cur_result['tot_where'].startswith('WHERE '):
+                sql += ' ' + cur_result['tot_where']
+            if 'tot_group_by' in cur_result and cur_result['tot_group_by'].startswith('GROUP BY '):
+                sql += ' ' + cur_result['tot_group_by']
+            if 'tot_order_by' in cur_result and cur_result['tot_order_by'].startswith('ORDER BY '):
+                sql += ' ' + cur_result['tot_order_by']
+            sqls.append(str(i + 1) + '. ' + sql)
+        if args.gpt in GPT_CHAT_MODELS:
+            prompt = [
+                {'role': 'system', 'content': f'Given the database schema and the question, you need to determine the top-{beam_size} among {len(cur_results)} unfinished SQL queries to solve the question. Print each ID in each line.'},
+                {'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\n' + '\n'.join(sqls)}
+            ]
+        elif args.gpt in GPT_COMPLETION_MODELS:
+            prompt = ''
+            pass
         else:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
@@ -131,13 +185,17 @@ class PromptMaker:
             prompt += 'SELECT'
         return prompt
 
-    def is_valid_shots(self, shots, args):
+    def is_valid_shots(self, shots, args, iue=False):
+        if iue:
+            for shot in shots:
+                if shot['iue'].lower() not in SET_OPS:
+                    return False
         prompt = self.get_prompt_phase_1(args, shots=shots) if args.two_phase else self.get_prompt(args, shots=shots)
         prompt_len = len(prompt) if isinstance(prompt, str) else sum([len(message['content']) for message in prompt])
         max_len = 15000 if args.gpt == 'code-davinci-002' else 7500
         return prompt_len < max_len * len(shots) / (args.cluster_num + args.dynamic_num)
 
-    def get_static_shots(self, dataset, args):
+    def get_static_shots(self, dataset, args, iue=False):
         if args.zero_shot or args.cluster_num == 0:
             return []
         while 1:
@@ -150,10 +208,10 @@ class PromptMaker:
                 shots = []
                 for cluster in range(args.cluster_num):
                     shots.append(random.choice([example for example in dataset if example['cluster'] == cluster]))
-            if self.is_valid_shots(shots, args):
+            if self.is_valid_shots(shots, args, iue):
                 return shots
 
-    def get_dynamic_shots(self, encoding, dataset, args):
+    def get_dynamic_shots(self, encoding, dataset, args, iue=False):
         if args.zero_shot or args.dynamic_num == 0:
             return []
         scores = util.cos_sim(encoding, [example[args.encoding + '_encoding'] for example in dataset]).squeeze(0).tolist()
@@ -161,7 +219,7 @@ class PromptMaker:
         shots = []
         for item in scores:
             shots.append(dataset[item[0]])
-            if not self.is_valid_shots(shots, args):
+            if not self.is_valid_shots(shots, args, iue):
                 shots.pop()
             elif len(shots) == args.dynamic_num:
                 break

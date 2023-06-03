@@ -4,11 +4,12 @@ from itertools import combinations
 from nltk import word_tokenize
 from sentence_transformers import SentenceTransformer, util
 from util.arg import cot_args
+from util.constant import SET_OPS
 
 
 def get_tables_in_sql(sql, db):
     tables = get_tables_in_sql_unit(sql, db)
-    for set_op in ['intersect', 'union', 'except']:
+    for set_op in SET_OPS:
         if sql[set_op]:
             tables.update(get_tables_in_sql(sql[set_op], db))
     return tables
@@ -36,7 +37,7 @@ def get_tables_in_conds(conds, db):
 
 def get_columns_in_sql(sql, db):
     columns = get_columns_in_sql_unit(sql, db)
-    for set_op in ['intersect', 'union', 'except']:
+    for set_op in SET_OPS:
         if sql[set_op]:
             columns.update(get_columns_in_sql(sql[set_op], db))
     return columns
@@ -90,7 +91,7 @@ def get_columns_in_col_unit(col_unit, db):
 
 def get_values_in_sql(sql):
     values = get_values_in_sql_unit(sql)
-    for set_op in ['intersect', 'union', 'except']:
+    for set_op in SET_OPS:
         if sql[set_op]:
             values.update(get_values_in_sql(sql[set_op]))
     return values
