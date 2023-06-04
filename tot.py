@@ -135,17 +135,17 @@ for example in dataset:
     sql = example['sql']
     for set_op in SET_OPS:
         if sql[set_op]:
-            example['iue'] = set_op.upper()
+            example['tot_iue'] = set_op.upper()
             break
     else:
-        example['iue'] = 'No set operator is needed.'
+        example['tot_iue'] = 'No set operator is needed.'
     example['tot_select'] = parse_select(sql['select'], db)
     example['tot_from'] = parse_from(sql['from'], db)
     example['tot_where'] = parse_where(sql['where'], db) if sql['where'] else 'The WHERE clause is not needed.'
     example['tot_group_by'] = parse_group_by(sql['groupBy'], sql['having'], db) if sql['groupBy'] else 'The GROUP BY clause is not needed.'
     example['tot_order_by'] = parse_order_by(sql['orderBy'], sql['limit'], db) if sql['orderBy'] else 'The ORDER BY clause is not needed.'
-    if example['iue'].lower() in SET_OPS:
-        set_op = example['iue'].lower()
+    if example['tot_iue'].lower() in SET_OPS:
+        set_op = example['tot_iue'].lower()
         example['tot_iue_select'] = parse_select(sql[set_op]['select'], db)
         example['tot_iue_from'] = parse_from(sql[set_op]['from'], db)
         example['tot_iue_where'] = parse_where(sql[set_op]['where'], db) if sql[set_op]['where'] else 'The WHERE clause is not needed.'

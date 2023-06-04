@@ -134,8 +134,8 @@ class PromptMaker:
             sqls.append(str(i + 1) + '. ' + sql)
         if args.gpt in GPT_CHAT_MODELS:
             prompt = [
-                {'role': 'system', 'content': f'Given the database schema and the question, you need to determine the top-{beam_size} among {len(cur_results)} unfinished SQL queries to solve the question. Print each ID in each line.'},
-                {'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\n' + '\n'.join(sqls)}
+                {'role': 'system', 'content': f'Given the database schema and the question, you need to determine the top-{beam_size} among {len(cur_results)} unfinished SQL queries to solve the question. Please print SQL IDs in the last line.'},
+                {'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\nUnfinished SQL queries:\n' + '\n'.join(sqls)}
             ]
         elif args.gpt in GPT_COMPLETION_MODELS:
             prompt = ''
@@ -185,17 +185,24 @@ class PromptMaker:
             prompt += 'SELECT'
         return prompt
 
-    def is_valid_shots(self, shots, args, iue=False):
-        if iue:
+    def is_valid_shots(self, shots, args, request=None):
+        if request:
+            assert request in ['iue', 'select', 'from', 'where', 'group_by', 'order_by']
             for shot in shots:
-                if shot['iue'].lower() not in SET_OPS:
+                if request == 'iue' and shot['tot_iue'].lower() not in SET_OPS:
+                    return False
+                if request == 'where' and not shot['tot_where'].startswith('WHERE '):
+                    return False
+                if request == 'group_by' and not shot['tot_group_by'].startswith('GROUP BY '):
+                    return False
+                if request == 'order_by' and not shot['tot_order_by'].startswith('ORDER BY '):
                     return False
         prompt = self.get_prompt_phase_1(args, shots=shots) if args.two_phase else self.get_prompt(args, shots=shots)
         prompt_len = len(prompt) if isinstance(prompt, str) else sum([len(message['content']) for message in prompt])
         max_len = 15000 if args.gpt == 'code-davinci-002' else 7500
         return prompt_len < max_len * len(shots) / (args.cluster_num + args.dynamic_num)
 
-    def get_static_shots(self, dataset, args, iue=False):
+    def get_static_shots(self, dataset, args, request=None):
         if args.zero_shot or args.cluster_num == 0:
             return []
         while 1:
@@ -208,10 +215,10 @@ class PromptMaker:
                 shots = []
                 for cluster in range(args.cluster_num):
                     shots.append(random.choice([example for example in dataset if example['cluster'] == cluster]))
-            if self.is_valid_shots(shots, args, iue):
+            if self.is_valid_shots(shots, args, request):
                 return shots
 
-    def get_dynamic_shots(self, encoding, dataset, args, iue=False):
+    def get_dynamic_shots(self, encoding, dataset, args):
         if args.zero_shot or args.dynamic_num == 0:
             return []
         scores = util.cos_sim(encoding, [example[args.encoding + '_encoding'] for example in dataset]).squeeze(0).tolist()
@@ -219,7 +226,7 @@ class PromptMaker:
         shots = []
         for item in scores:
             shots.append(dataset[item[0]])
-            if not self.is_valid_shots(shots, args, iue):
+            if not self.is_valid_shots(shots, args):
                 shots.pop()
             elif len(shots) == args.dynamic_num:
                 break

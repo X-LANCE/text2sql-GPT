@@ -6,8 +6,10 @@ import time
 from util.constant import SPEECH_API_TOKEN
 
 
-def get_response(prompt, args, temperature=0):
+def get_response(prompt, args, temperature=0, stop=None):
     max_tokens = 750 if args.cot else 150
+    if isinstance(prompt, str) and stop is None:
+        stop = [';', '\n\n', 'Given', 'Question', 'Translate']
     if args.speech_api:
         post_data = {
             'model': args.gpt,
@@ -15,12 +17,12 @@ def get_response(prompt, args, temperature=0):
             'temperature': temperature,
             'top_p': 1,
             'frequency_penalty': 0,
-            'presence_penalty': 0
+            'presence_penalty': 0,
+            'stop': stop
         }
         if isinstance(prompt, str):
             url = 'http://54.193.55.85:10030/v1/completions?use_cache=false'
             post_data['prompt'] = prompt
-            post_data['stop'] = [';', '\n\n', 'Given', 'Question', 'Translate']
         else:
             url = 'http://54.193.55.85:10030/v1/completions/chat?use_cache=false'
             post_data['messages'] = prompt
@@ -45,7 +47,7 @@ def get_response(prompt, args, temperature=0):
                     top_p=1,
                     frequency_penalty=0,
                     presence_penalty=0,
-                    stop=[';', '\n\n', 'Given', 'Question', 'Translate']
+                    stop=stop
                 )
                 return response['choices'][0]['text']
             except Exception as e:
@@ -62,7 +64,8 @@ def get_response(prompt, args, temperature=0):
                     temperature=temperature,
                     top_p=1,
                     frequency_penalty=0,
-                    presence_penalty=0
+                    presence_penalty=0,
+                    stop=stop
                 )
                 return response['choices'][0]['message']['content']
             except Exception as e:

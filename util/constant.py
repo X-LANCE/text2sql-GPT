@@ -13,17 +13,12 @@ OPS = [None, '-', '+', '*', '/']
 SET_OPS = ['intersect', 'union', 'except']
 
 TOT_CLAUSES = [
-    'iue',
+    'tot_iue',
     'tot_select',
     'tot_where',
     'tot_group_by',
     'tot_order_by',
-    'tot_from',
-    'tot_iue_select',
-    'tot_iue_where',
-    'tot_iue_group_by',
-    'tot_iue_order_by',
-    'tot_iue_from'
+    'tot_from'
 ]
 
 TOT_INSTRUCTIONS = [
@@ -35,6 +30,11 @@ TOT_INSTRUCTIONS = [
     'Given the database schema, you need to translate the question into the SQL query. In previous steps, some clauses have been determined. In this step, you need to determine the FROM clause (including the ON clause if needed).'
 ]
 
-TOT_IUE_INSTRUCTIONS = [
-    ''
+TOT_STOPS = [
+    None,
+    ['FROM'],
+    ['GROUP BY', 'ORDER BY'],
+    ['ORDER BY'],
+    None,
+    ['WHERE', 'GROUP BY', 'ORDER BY']
 ]

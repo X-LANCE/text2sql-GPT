@@ -7,11 +7,19 @@ from eval.evaluation import Evaluator, isValidSQL
 from eval.process_sql import Schema, get_schema, get_sql
 from sentence_transformers import SentenceTransformer
 from util.arg import main_args
-from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, TOT_CLAUSES, TOT_INSTRUCTIONS, TOT_IUE_INSTRUCTIONS
+from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, TOT_CLAUSES, TOT_INSTRUCTIONS, TOT_STOPS
 from util.encode import encode_dataset
 from util.example import Example
 from util.gpt import get_response
 from util.prompt import PromptMaker
+
+
+def is_int(token):
+    try:
+        token = int(token)
+        return True
+    except:
+        return False
 
 
 def load_cached_json_file(filename):
@@ -69,7 +77,6 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         labeled_shots = load_cached_json_file(os.path.join(args.log_path, 'shot.json'))
     else:
         static_shots = prompt_maker.get_static_shots(train_dataset, args)
-        static_iue_shots = prompt_maker.get_static_shots(train_dataset, args, True)
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
     pred_filename = os.path.join(args.log_path, 'pred.sql')
@@ -83,6 +90,9 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
     if args.cot:
         cot_filename = os.path.join(args.log_path, 'cot.json')
         cots = load_cached_json_file(cot_filename)
+    if args.tot:
+        tot_filename = os.path.join(args.log_path, 'tot.json')
+        tots = load_cached_json_file(tot_filename)
     if args.two_phase:
         pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
         pseudo_queries = load_cached_json_file(pseudo_filename)
@@ -102,7 +112,6 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         else:
             if args.zero_shot or args.dynamic_num == 0 or args.encoding == 'question' or args.oracle:
                 dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
-                dynamic_iue_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args, True)
             else:
                 response = get_response(prompt_maker.get_prompt(args, db_id, question, static_shots), args)
                 encoding = sentence_encoder.encode(
@@ -113,7 +122,6 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                     device=args.device
                 ).cpu().tolist()
                 dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
-                dynamic_iue_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args, True)
             shots = static_shots + dynamic_shots
         if args.cot:
             cots[str(i)] = {'c_num': args.content + 1}
@@ -125,19 +133,35 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             save_cached_json_file(cot_filename, cots)
             pred_file.write(postprocess(response, args, db_id) + '\n')
         elif args.tot:
+            tots[str(i)] = {str(step): {} for step in range(1, len(TOT_INSTRUCTIONS))}
+            static_shots = prompt_maker.get_static_shots(train_dataset, args, 'iue')
             prev_results = [{'db_id': db_id, 'question': question}]
-            prev_results[0]['iue'] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, 0, prev_results[0], static_iue_shots + dynamic_shots), args)
+            prev_results[0]['tot_iue'] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, 0, prev_results[0], static_shots + dynamic_shots), args).strip()
             for step in range(1, len(TOT_INSTRUCTIONS)):
+                static_shots = prompt_maker.get_static_shots(train_dataset, args, TOT_CLAUSES[step][4:])
                 cur_results = []
                 for prev_result in prev_results:
                     for _ in range(args.tot_k):
-                        cur_results.append(prev_result)
-                        cur_results[-1][TOT_CLAUSES[step]] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, 0.1)
-                response = get_response(prompt_maker.get_prompt_tot_evaluate(args, cur_results, args.tot_b if step < len(TOT_INSTRUCTIONS) - 1 else 1), args)
-                prev_results = [cur_results[int(k)] for k in response.split()]
+                        cur_results.append(prev_result.copy())
+                        cur_results[-1][TOT_CLAUSES[step]] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, args.tot_t, TOT_STOPS[step]).strip()
+                        if step == 2 and (not cur_results[-1][TOT_CLAUSES[2]].startswith('WHERE ') or 'not needed' in cur_results[-1][TOT_CLAUSES[2]]):
+                            cur_results[-1][TOT_CLAUSES[2]] = 'The WHERE clause is not needed.'
+                        if step == 3 and (not cur_results[-1][TOT_CLAUSES[3]].startswith('GROUP BY ') or 'not needed' in cur_results[-1][TOT_CLAUSES[3]]):
+                            cur_results[-1][TOT_CLAUSES[3]] = 'The GROUP BY clause is not needed.'
+                        if step == 4 and (not cur_results[-1][TOT_CLAUSES[4]].startswith('ORDER BY ') or 'not needed' in cur_results[-1][TOT_CLAUSES[4]]):
+                            cur_results[-1][TOT_CLAUSES[4]] = 'The ORDER BY clause is not needed.'
+                tots[str(i)][str(step)]['tots'] = cur_results
+                beam_size = args.tot_b if step < len(TOT_INSTRUCTIONS) - 1 else 1
+                response = get_response(prompt_maker.get_prompt_tot_evaluate(args, cur_results, beam_size), args).strip()
+                best_ids = [int(token) for token in response.split('\n')[-1].replace(',', ' , ').replace('.', ' . ').split() if is_int(token)]
+                if len(best_ids) != beam_size:
+                    best_ids = [int(token) for token in response.split('\n')[0].replace(',', ' , ').replace('.', ' . ').split() if is_int(token)]
+                prev_results = [cur_results[k - 1] for k in best_ids]
+                tots[str(i)][str(step)]['eval'] = response
+                save_cached_json_file(tot_filename, tots)
             sql = prev_results[0]['tot_select'] + ' ' + prev_results[0]['tot_from']
-            if prev_results[0]['tot_where'].startwith('WHERE '):
-                sql += ' ' + prev_results[0]['WHERE']
+            if prev_results[0]['tot_where'].startswith('WHERE '):
+                sql += ' ' + prev_results[0]['tot_where']
             if prev_results[0]['tot_group_by'].startswith('GROUP BY '):
                 sql += ' ' + prev_results[0]['tot_group_by']
             if prev_results[0]['tot_order_by'].startswith('ORDER BY '):
