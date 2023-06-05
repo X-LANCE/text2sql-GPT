@@ -7,7 +7,7 @@ from eval.evaluation import Evaluator, isValidSQL
 from eval.process_sql import Schema, get_schema, get_sql
 from sentence_transformers import SentenceTransformer
 from util.arg import main_args
-from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, TOT_CLAUSES, TOT_INSTRUCTIONS, TOT_STOPS
+from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, SET_OPS, TOT_CLAUSES, TOT_INSTRUCTIONS, TOT_STOPS
 from util.encode import encode_dataset
 from util.example import Example
 from util.gpt import get_response
@@ -134,10 +134,15 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             save_cached_json_file(cot_filename, cots)
             pred_file.write(postprocess(response, args, db_id) + '\n')
         elif args.tot:
-            tots[str(i)] = {str(step): {} for step in range(1, len(TOT_INSTRUCTIONS))}
             static_shots = prompt_maker.get_static_shots(train_dataset, args, 'iue')
             prev_results = [{'db_id': db_id, 'question': question}]
             prev_results[0]['tot_iue'] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, 0, prev_results[0], static_shots + dynamic_shots), args).strip()
+            if prev_results[0]['tot_iue'].lower() in SET_OPS:
+                response = get_response(prompt_maker.get_prompt(args, db_id, question, shots), args)
+                pred_file.write(postprocess(response, args, db_id) + '\n')
+                pred_file.flush()
+                continue
+            tots[str(i)] = {str(step): {} for step in range(1, len(TOT_INSTRUCTIONS))}
             for step in range(1, len(TOT_INSTRUCTIONS)):
                 static_shots = prompt_maker.get_static_shots(train_dataset, args, TOT_CLAUSES[step][4:])
                 cur_results = []
