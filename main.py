@@ -93,6 +93,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
     if args.tot:
         tot_filename = os.path.join(args.log_path, 'tot.json')
         tots = load_cached_json_file(tot_filename)
+        eval_shots = load_cached_json_file(os.path.join(args.log_path, 'eval.json'))
     if args.two_phase:
         pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
         pseudo_queries = load_cached_json_file(pseudo_filename)
@@ -143,22 +144,29 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 for prev_result in prev_results:
                     for _ in range(args.tot_k):
                         cur_results.append(prev_result.copy())
-                        cur_results[-1][TOT_CLAUSES[step]] = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, args.tot_t, TOT_STOPS[step]).strip()
-                        if step == 2 and (not cur_results[-1][TOT_CLAUSES[2]].startswith('WHERE ') or 'not needed' in cur_results[-1][TOT_CLAUSES[2]]):
-                            cur_results[-1][TOT_CLAUSES[2]] = 'The WHERE clause is not needed.'
-                        if step == 3 and (not cur_results[-1][TOT_CLAUSES[3]].startswith('GROUP BY ') or 'not needed' in cur_results[-1][TOT_CLAUSES[3]]):
-                            cur_results[-1][TOT_CLAUSES[3]] = 'The GROUP BY clause is not needed.'
-                        if step == 4 and (not cur_results[-1][TOT_CLAUSES[4]].startswith('ORDER BY ') or 'not needed' in cur_results[-1][TOT_CLAUSES[4]]):
-                            cur_results[-1][TOT_CLAUSES[4]] = 'The ORDER BY clause is not needed.'
-                tots[str(i)][str(step)]['tots'] = cur_results
+                        response = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, args.tot_t, TOT_STOPS[step]).strip('\t\n .;')
+                        end_idx = response.find('\t')
+                        if end_idx >= 0:
+                            response = response[:end_idx]
+                        for clause in ['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY']:
+                            for prefix in [clause + ': ', clause.lower() + ': ', clause + ' clause: ', clause.lower() + ' clause: ']:
+                                if response.startswith(prefix):
+                                    response = response[len(prefix):]
+                        if step == 2 and (not response.startswith('WHERE ') or 'not needed' in response or 'not required' in response):
+                            response = 'The WHERE clause is not needed.'
+                        if step == 3 and (not response.startswith('GROUP BY ') or 'not needed' in response or 'not required' in response):
+                            response = 'The GROUP BY clause is not needed.'
+                        if step == 4 and (not response.startswith('ORDER BY ') or 'not needed' in response or 'not required' in response):
+                            response = 'The ORDER BY clause is not needed.'
+                        cur_results[-1][TOT_CLAUSES[step]] = response
                 beam_size = args.tot_b if step < len(TOT_INSTRUCTIONS) - 1 else 1
-                response = get_response(prompt_maker.get_prompt_tot_evaluate(args, cur_results, beam_size), args).strip()
-                best_ids = [int(token) for token in response.split('\n')[-1].replace(',', ' , ').replace('.', ' . ').split() if is_int(token)]
-                if len(best_ids) != beam_size:
-                    best_ids = [int(token) for token in response.split('\n')[0].replace(',', ' , ').replace('.', ' . ').split() if is_int(token)]
-                prev_results = [cur_results[k - 1] for k in best_ids]
-                tots[str(i)][str(step)]['eval'] = response
+                tots[str(i)][str(step)]['tots'] = cur_results
+                tots[str(i)][str(step)]['eval'] = get_response(prompt_maker.get_prompt_tot_evaluate(args, cur_results, beam_size, eval_shots), args).strip()
                 save_cached_json_file(tot_filename, tots)
+                top_ids = [int(k) - 1 for k in tots[str(i)][str(step)]['eval'].split('\n')[-1].replace(',', ' , ').replace('.', ' . ').split() if is_int(k)]
+                if len(top_ids) == 0:
+                    top_ids = range(min(len(cur_results), beam_size))
+                prev_results = [cur_results[k] for k in top_ids[:beam_size]]
             sql = prev_results[0]['tot_select'] + ' ' + prev_results[0]['tot_from']
             if prev_results[0]['tot_where'].startswith('WHERE '):
                 sql += ' ' + prev_results[0]['tot_where']
@@ -166,7 +174,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 sql += ' ' + prev_results[0]['tot_group_by']
             if prev_results[0]['tot_order_by'].startswith('ORDER BY '):
                 sql += ' ' + prev_results[0]['tot_order_by']
-            pred_file.write(sql + '\n')
+            pred_file.write(postprocess(sql, args, db_id) + '\n')
         elif args.two_phase:
             prompt_phase_1 = prompt_maker.get_prompt_phase_1(args, question, shots)
             if str(i) not in pseudo_queries:

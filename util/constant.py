@@ -32,9 +32,9 @@ TOT_INSTRUCTIONS = [
 
 TOT_STOPS = [
     None,
-    ['FROM'],
-    ['GROUP BY', 'ORDER BY'],
-    ['ORDER BY'],
+    ['FROM', 'from'],
+    ['GROUP BY', 'group by', 'ORDER BY', 'order by'],
+    ['ORDER BY', 'order by'],
     None,
-    ['WHERE', 'GROUP BY', 'ORDER BY']
+    ['WHERE', 'where', 'GROUP BY', 'ORDER BY']
 ]

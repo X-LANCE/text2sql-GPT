@@ -119,7 +119,7 @@ class PromptMaker:
         add_item(prev_result)
         return prompt
 
-    def get_prompt_tot_evaluate(self, args, cur_results, beam_size):
+    def get_prompt_tot_evaluate(self, args, cur_results, beam_size, shots):
         db_id, question, sqls = cur_results[0]['db_id'], cur_results[0]['question'], []
         for i, cur_result in enumerate(cur_results):
             sql = cur_result['tot_select']
@@ -133,10 +133,11 @@ class PromptMaker:
                 sql += ' ' + cur_result['tot_order_by']
             sqls.append(str(i + 1) + '. ' + sql)
         if args.gpt in GPT_CHAT_MODELS:
-            prompt = [
-                {'role': 'system', 'content': f'Given the database schema and the question, you need to determine the top-{beam_size} among {len(cur_results)} unfinished SQL queries to solve the question. Please print SQL IDs in the last line.'},
-                {'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\nUnfinished SQL queries:\n' + '\n'.join(sqls)}
-            ]
+            prompt = [{'role': 'system', 'content': f"Given the database schema and the question, you need to determine the top-{beam_size} among all unfinished SQL queries to solve the question. Please list the top-{beam_size} SQL ID{'s' if beam_size > 1 else ''} in the last line."}]
+            for shot in shots:
+                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']][args.content]}\nQuestion: {shot['question']}\nUnfinished SQL queries:\n" + '\n'.join(shot['sqls'])})
+                prompt.append({'role': 'assistant', 'content': shot['eval']})
+            prompt.append({'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\nUnfinished SQL queries:\n' + '\n'.join(sqls)})
         elif args.gpt in GPT_COMPLETION_MODELS:
             prompt = ''
             pass
