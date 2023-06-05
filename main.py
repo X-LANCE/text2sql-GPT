@@ -129,7 +129,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             response = None
             while response is None:
                 cots[str(i)]['c_num'] -= 1
-                response = get_response(prompt_maker.get_prompt(args, db_id, question, shots, cots[str(i)]['c_num']), args)
+                response = get_response(prompt_maker.get_prompt(args, db_id, question, shots, cots[str(i)]['c_num']), args, max_tokens=750)
             cots[str(i)]['cot'] = response
             save_cached_json_file(cot_filename, cots)
             pred_file.write(postprocess(response, args, db_id) + '\n')
@@ -149,7 +149,8 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 for prev_result in prev_results:
                     for _ in range(args.tot_k):
                         cur_results.append(prev_result.copy())
-                        response = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, args.tot_t, TOT_STOPS[step]).strip('\t\n .;')
+                        response = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, temperature=args.tot_t).strip('\t\n .;')
+                        response = ' '.join(response.split())
                         end_idx = response.find('\t')
                         if end_idx >= 0:
                             response = response[:end_idx]
@@ -163,10 +164,28 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                             response = 'The GROUP BY clause is not needed.'
                         if step == 4 and (not response.startswith('ORDER BY ') or 'not needed' in response or 'not required' in response):
                             response = 'The ORDER BY clause is not needed.'
-                        cur_results[-1][TOT_CLAUSES[step]] = response
+                        par_cnt, tok_idx = 0, 0
+                        while tok_idx < len(response):
+                            if response[tok_idx] == '(':
+                                par_cnt += 1
+                                tok_idx += 1
+                                continue
+                            if response[tok_idx] == ')':
+                                par_cnt -= 1
+                                tok_idx += 1
+                                continue
+                            if par_cnt > 0:
+                                tok_idx += 1
+                                continue
+                            for stop in TOT_STOPS[step]:
+                                if response[tok_idx:tok_idx + len(stop)] in [stop, stop.lower()]:
+                                    response = response[:tok_idx]
+                                    break
+                            tok_idx += 1
+                        cur_results[-1][TOT_CLAUSES[step]] = response.strip()
                 beam_size = args.tot_b if step < len(TOT_INSTRUCTIONS) - 1 else 1
                 tots[str(i)][str(step)]['tots'] = cur_results
-                tots[str(i)][str(step)]['eval'] = get_response(prompt_maker.get_prompt_tot_evaluate(args, cur_results, beam_size, eval_shots), args).strip()
+                tots[str(i)][str(step)]['eval'] = get_response(prompt_maker.get_prompt_tot_evaluate(args, cur_results, beam_size, eval_shots), args, max_tokens=750).strip()
                 save_cached_json_file(tot_filename, tots)
                 top_ids = [int(k) - 1 for k in tots[str(i)][str(step)]['eval'].split('\n')[-1].replace(',', ' , ').replace('.', ' . ').split() if is_int(k)]
                 if len(top_ids) == 0:
