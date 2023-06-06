@@ -244,9 +244,28 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 pred_file.write(query.strip('\t ;') + '\n')
                 pred_file.flush()
                 continue
-            refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i]), args, max_tokens=750)
+            if args.ref_shot:
+                dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
+                shots = static_shots + dynamic_shots
+                for j, shot in enumerate(shots):
+                    if args.cot:
+                        c_num = args.content + 1
+                        response = None
+                        while response is None:
+                            c_num -= 1
+                            response = get_response(prompt_maker.get_prompt(args, shot['db_id'], shot['question'], shots[:j] + shots[j + 1:], c_num), args, max_tokens=750)
+                    else:
+                        response = get_response(prompt_maker.get_prompt(args, shot['db_id'], shot['question'], shots[:j] + shots[j + 1:]), args)
+                    shot['pred'] = postprocess(response, args, shot['db_id'])
+                    shot['gold'] = ' '.join(shot['query'].strip('\t ;').split())
+                    shot['reflection'] = get_response(prompt_maker.get_prompt_explain(args, shot['db_id'], shot['question'], shot['pred'], shot['gold']), args, max_tokens=750).strip()
+                    shot['reflection'] += '\nSo the correct SQL is:\n' + shot['gold']
+                refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i], shots), args, max_tokens=750)
+                pred_file.write((postprocess(refs[str(i)].split('\n')[-1], args, db_id) if 'SELECT ' in refs[str(i)] else sqls[i]) + '\n')
+            else:
+                refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i]), args, max_tokens=750)
+                pred_file.write((postprocess(refs[str(i)], args, db_id) if 'SELECT ' in refs[str(i)] else sqls[i]) + '\n')
             save_cached_json_file(ref_filename, refs)
-            pred_file.write((postprocess(refs[str(i)], args, db_id) if 'SELECT ' in refs[str(i)] else sqls[i]) + '\n')
             pred_file.flush()
         pred_file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)

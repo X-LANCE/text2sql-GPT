@@ -25,6 +25,7 @@ def main_args():
     arg_parser.add_argument('--tot_b', default=1, type=int, help='b for tree of thought')
     arg_parser.add_argument('--tot_t', default=1.5, type=float, help='temperature for tree of thought')
     arg_parser.add_argument('--reflection', action='store_true', help='use self-reflection')
+    arg_parser.add_argument('--ref_shot', action='store_true', help='few-shot for self-reflection')
     arg_parser.add_argument('--oracle', action='store_true', help='given queries in the dev dataset')
     arg_parser.add_argument('--two_phase', action='store_true', help='use two phase method')
     arg_parser.add_argument('--hard_and_extra', action='store_true', help='only test hard and extra hard examples')
@@ -53,6 +54,8 @@ def main_args():
         args.log_path += '__tot_t_' + str(args.tot_t)
     if args.reflection:
         args.log_path += '__reflection'
+        if args.ref_shot:
+            args.log_path += '__ref_shot'
     if args.oracle:
         args.log_path += '__oracle'
     if args.two_phase:
