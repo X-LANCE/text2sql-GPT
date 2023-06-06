@@ -97,9 +97,11 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
     if args.two_phase:
         pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
         pseudo_queries = load_cached_json_file(pseudo_filename)
+    if args.reflection:
+        pred_no_ref_filename = os.path.join(args.log_path, 'pred_no_reflection.sql')
     for i, example in enumerate(dev_dataset):
         print(f'Decoding example {i} ...')
-        if i < cached:
+        if i < cached or os.path.exists(pred_no_ref_filename):
             continue
         db_id = example['db_id']
         query = example['query']
@@ -151,9 +153,10 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                         cur_results.append(prev_result.copy())
                         response = get_response(prompt_maker.get_prompt_tot_generate(args, TOT_INSTRUCTIONS, step, prev_result, static_shots + dynamic_shots), args, temperature=args.tot_t).strip('\t\n .;')
                         response = ' '.join(response.split())
-                        end_idx = response.find('\t')
-                        if end_idx >= 0:
-                            response = response[:end_idx]
+                        for invalid_token in ['\t', '`']:
+                            end_idx = response.find(invalid_token)
+                            if end_idx >= 0:
+                                response = response[:end_idx]
                         for clause in ['SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY']:
                             for prefix in [clause + ': ', clause.lower() + ': ', clause + ' clause: ', clause.lower() + ' clause: ']:
                                 if response.startswith(prefix):
@@ -216,6 +219,36 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             pred_file.write(postprocess(response, args, db_id) + '\n')
         pred_file.flush()
     pred_file.close()
+    if args.reflection:
+        if not os.path.exists(pred_no_ref_filename):
+            os.rename(pred_filename, pred_no_ref_filename)
+        with open(pred_no_ref_filename, 'r', encoding='utf-8') as pred_no_ref_file:
+            sqls = [sql.strip() for sql in pred_no_ref_file.readlines()]
+        if os.path.exists(pred_filename):
+            with open(pred_filename, 'r', encoding='utf-8') as pred_file:
+                cached = pred_file.read().count('\n')
+            pred_file = open(pred_filename, 'a', encoding='utf-8')
+        else:
+            cached = 0
+            pred_file = open(pred_filename, 'w', encoding='utf-8')
+        ref_filename = os.path.join(args.log_path, 'ref.json')
+        refs = load_cached_json_file(ref_filename)
+        for i, example in enumerate(dev_dataset):
+            print(f'Correcting example {i} ...')
+            if i < cached:
+                continue
+            db_id = example['db_id']
+            query = example['query']
+            question = example['question']
+            if args.hard_and_extra and eval_hardness(db_id, query) in ['easy', 'medium']:
+                pred_file.write(query.strip('\t ;') + '\n')
+                pred_file.flush()
+                continue
+            refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i]), args, max_tokens=750)
+            save_cached_json_file(ref_filename, refs)
+            pred_file.write((postprocess(refs[str(i)], args, db_id) if 'SELECT ' in refs[str(i)] else sqls[i]) + '\n')
+            pred_file.flush()
+        pred_file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)
 
 

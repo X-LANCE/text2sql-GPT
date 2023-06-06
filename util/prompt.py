@@ -145,6 +145,19 @@ class PromptMaker:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
 
+    def get_prompt_reflection(self, args, db_id, question, sql):
+        if args.gpt in GPT_CHAT_MODELS:
+            prompt = [
+                {'role': 'system', 'content': 'Given the database schema and the question, the SQL query may contain bugs. If the SQL query is buggy, you need to write the correct SQL query. Otherwise you need to write the original SQL query.'},
+                {'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\nSQL: {sql}'}
+            ]
+        elif args.gpt in GPT_COMPLETION_MODELS:
+            prompt = ''
+            pass
+        else:
+            raise ValueError(f'unknown GPT model {args.gpt}')
+        return prompt
+
     def get_prompt_phase_1(self, args, question=None, shots=[]):
         if args.gpt in GPT_CHAT_MODELS:
             prompt = [{'role': 'system', 'content': 'You need to translate the question into the SQL query.'}]
