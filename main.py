@@ -42,23 +42,20 @@ def eval_hardness(db_id, sql):
 
 
 def postprocess(response, args, db_id=None):
-    if args.cot:
-        original_sql = response.split('\n')[-1]
-    else:
-        if args.gpt in GPT_CHAT_MODELS:
-            start_idx = response.find('SELECT')
+    if args.gpt in GPT_CHAT_MODELS:
+        start_idx = response.find('SELECT')
+        if start_idx < 0:
+            start_idx = response.find('select')
             if start_idx < 0:
-                start_idx = response.find('select')
-                if start_idx < 0:
-                    return response
-            original_sql = response[start_idx:]
-            end_idx = original_sql.find('```')
-            if end_idx >= 0:
-                original_sql = original_sql[:end_idx]
-        elif args.gpt in GPT_COMPLETION_MODELS:
-            original_sql = 'SELECT ' + response
-        else:
-            raise ValueError(f'unknown GPT model {args.gpt}')
+                return response
+        original_sql = response[start_idx:]
+        end_idx = original_sql.find('```')
+        if end_idx >= 0:
+            original_sql = original_sql[:end_idx]
+    elif args.gpt in GPT_COMPLETION_MODELS:
+        original_sql = 'SELECT ' + response
+    else:
+        raise ValueError(f'unknown GPT model {args.gpt}')
     original_sql = ' '.join(original_sql.replace('==', '=').replace('<>', '!=').split())
     original_sql = original_sql.replace('INNER JOIN', 'JOIN').replace('inner join', 'join')
     original_sql = original_sql.replace('LEFT JOIN', 'JOIN').replace('left join', 'join')
@@ -134,7 +131,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 response = get_response(prompt_maker.get_prompt(args, db_id, question, shots, cots[str(i)]['c_num']), args, max_tokens=750)
             cots[str(i)]['cot'] = response
             save_cached_json_file(cot_filename, cots)
-            pred_file.write(postprocess(response, args, db_id) + '\n')
+            pred_file.write(postprocess(response.split('\n')[-1], args, db_id) + '\n')
         elif args.tot:
             static_shots = prompt_maker.get_static_shots(train_dataset, args, 'iue')
             prev_results = [{'db_id': db_id, 'question': question}]
@@ -231,6 +228,8 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
         else:
             cached = 0
             pred_file = open(pred_filename, 'w', encoding='utf-8')
+        if args.ref_shot:
+            ref_shots = load_cached_json_file(os.path.join(args.log_path, 'ref_shot.json'))
         ref_filename = os.path.join(args.log_path, 'ref.json')
         refs = load_cached_json_file(ref_filename)
         for i, example in enumerate(dev_dataset):
@@ -245,27 +244,19 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 pred_file.flush()
                 continue
             if args.ref_shot:
-                dynamic_shots = prompt_maker.get_dynamic_shots(example[args.encoding + '_encoding'], train_dataset, args)
-                shots = static_shots + dynamic_shots
-                for j, shot in enumerate(shots):
-                    if args.cot:
-                        c_num = args.content + 1
-                        response = None
-                        while response is None:
-                            c_num -= 1
-                            response = get_response(prompt_maker.get_prompt(args, shot['db_id'], shot['question'], shots[:j] + shots[j + 1:], c_num), args, max_tokens=750)
-                    else:
-                        response = get_response(prompt_maker.get_prompt(args, shot['db_id'], shot['question'], shots[:j] + shots[j + 1:]), args)
-                    shot['pred'] = postprocess(response, args, shot['db_id'])
-                    shot['gold'] = ' '.join(shot['query'].strip('\t ;').split())
-                    shot['reflection'] = get_response(prompt_maker.get_prompt_explain(args, shot['db_id'], shot['question'], shot['pred'], shot['gold']), args, max_tokens=750).strip()
-                    shot['reflection'] += '\nSo the correct SQL is:\n' + shot['gold']
-                refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i], shots), args, max_tokens=750)
-                pred_file.write((postprocess(refs[str(i)].split('\n')[-1], args, db_id) if 'SELECT ' in refs[str(i)] else sqls[i]) + '\n')
+                response, c_num = None, args.content + 1
+                while response is None:
+                    c_num -= 1
+                    response = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i], ref_shots, c_num), args, max_tokens=750)
+                refs[str(i)] = response
+                sql = postprocess(response.split('\n')[-1], args, db_id)
             else:
                 refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i]), args, max_tokens=750)
-                pred_file.write((postprocess(refs[str(i)], args, db_id) if 'SELECT ' in refs[str(i)] else sqls[i]) + '\n')
+                sql = postprocess(refs[str(i)], args, db_id)
             save_cached_json_file(ref_filename, refs)
+            if not isValidSQL(sql, os.path.join(Example.evaluator.db_dir, db_id, db_id + '.sqlite')):
+                sql = sqls[i]
+            pred_file.write(sql + '\n')
             pred_file.flush()
         pred_file.close()
     return Example.evaluator.accuracy(pred_filename, dev_dataset, os.path.join(args.log_path, 'dev.txt'), etype=etype)

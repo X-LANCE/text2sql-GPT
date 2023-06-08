@@ -145,26 +145,15 @@ class PromptMaker:
             raise ValueError(f'unknown GPT model {args.gpt}')
         return prompt
 
-    def get_prompt_explain(self, args, db_id, question, pred, gold):
-        if args.gpt in GPT_CHAT_MODELS:
-            prompt = [
-                {'role': 'system', 'content': 'Given the database schema and the question, the predicted SQL may fail to solve the question. If so, you need to explain what is wrong in it comparing with the gold SQL.'},
-                {'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\nPredicted SQL: {pred}\nGold SQL: {gold}'}
-            ]
-        elif args.gpt in GPT_COMPLETION_MODELS:
-            prompt = ''
-            pass
-        else:
-            raise ValueError(f'unknown GPT model {args.gpt}')
-        return prompt
-
-    def get_prompt_reflection(self, args, db_id, question, sql, shots=[]):
+    def get_prompt_reflection(self, args, db_id, question, sql, shots=[], c_num=-1):
+        if c_num < 0:
+            c_num = args.content
         if args.gpt in GPT_CHAT_MODELS:
             prompt = [{'role': 'system', 'content': 'Given the database schema and the question, the SQL may fail to solve the question. You need to write the correct SQL.'}]
             for shot in shots:
-                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']][args.content]}\nQuestion: {shot['question']}\nSQL: {shot['pred']}"})
+                prompt.append({'role': 'user', 'content': f"Database schema:\n{self.db_prompts[shot['db_id']][c_num]}\nQuestion: {shot['question']}\nSQL: {shot['pred']}"})
                 prompt.append({'role': 'assistant', 'content': shot['reflection']})
-            prompt.append({'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][args.content]}\nQuestion: {question}\nSQL: {sql}'})
+            prompt.append({'role': 'user', 'content': f'Database schema:\n{self.db_prompts[db_id][c_num]}\nQuestion: {question}\nSQL: {sql}'})
         elif args.gpt in GPT_COMPLETION_MODELS:
             prompt = ''
             pass
