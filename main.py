@@ -79,7 +79,7 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
     pred_filename = os.path.join(args.log_path, 'pred.sql')
     if os.path.exists(pred_filename):
         with open(pred_filename, 'r', encoding='utf-8') as pred_file:
-            cached = pred_file.read().count('\n')
+            cached = sum([int(len(cached_sql) > 0) for cached_sql in pred_file.read().split('\n')])
         pred_file = open(pred_filename, 'a', encoding='utf-8')
     else:
         cached = 0
@@ -94,12 +94,14 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
     if args.two_phase:
         pseudo_filename = os.path.join(args.log_path, 'pseudo.json')
         pseudo_queries = load_cached_json_file(pseudo_filename)
-    if args.reflection:
-        pred_no_ref_filename = os.path.join(args.log_path, 'pred_no_reflection.sql')
+    pred_no_ref_filename = os.path.join(args.log_path, 'pred_no_reflection.sql')
     for i, example in enumerate(dev_dataset):
         print(f'Decoding example {i} ...')
         if i < cached or os.path.exists(pred_no_ref_filename):
             continue
+        if i > 0 and 'e_id' in dev_dataset[i] and dev_dataset[i]['e_id'] > dev_dataset[i - 1]['e_id']:
+            pred_file.write('\n')
+            pred_file.flush()
         db_id = example['db_id']
         query = example['query']
         question = example['question']

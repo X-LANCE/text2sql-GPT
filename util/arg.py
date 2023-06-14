@@ -96,3 +96,11 @@ def tot_args():
     arg_parser.add_argument('--dataset', default='spider', type=str, help='dataset name')
     args = arg_parser.parse_args()
     return args
+
+def multiturn_args():
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('--dataset', default='sparc', type=str, help='dataset name')
+    arg_parser.add_argument('--gpt', default='gpt-3.5-turbo', type=str, help='GPT model')
+    arg_parser.add_argument('--speech_api', action='store_true', help='use speech api')
+    args = arg_parser.parse_args()
+    return args

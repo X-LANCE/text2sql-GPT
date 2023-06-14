@@ -42,8 +42,9 @@ class PromptMaker:
                                 if cols[fk[0]][0] == i:
                                     self.db_prompts[db_id][c_num] += f'    foreign key ({cols[fk[0]][1]}) references {tabs[cols[fk[1]][0]]}({cols[fk[1]][1]}),\n'
                         self.db_prompts[db_id][c_num] = self.db_prompts[db_id][c_num][:-2] + '\n)\n'
-                    if c_num > 0:
-                        conn = sqlite3.connect(os.path.join('data', args.dataset, 'database', db_id, db_id + '.sqlite'))
+                    db_path = os.path.join('data', args.dataset, 'database', db_id, db_id + '.sqlite')
+                    if c_num > 0 and os.path.exists(db_path):
+                        conn = sqlite3.connect(db_path)
                         conn.row_factory = dict_factory
                         cursor = conn.cursor()
                         db_contents = cursor.execute(f'SELECT * FROM {tabs[i]} LIMIT {c_num}').fetchall()
@@ -200,6 +201,25 @@ class PromptMaker:
             prompt += self.db_prompts[db_id][args.content] + '\n'
             prompt += 'Correct your answer.\n'
             prompt += 'SELECT'
+        return prompt
+
+    @staticmethod
+    def get_prompt_remove_dependency(gpt, questions, shots):
+        def preprocess(q_list):
+            result = ''
+            for i, q in enumerate(q_list):
+                result += str(i + 1) + '. ' + q + '\n'
+            return result.strip()
+
+        if gpt in GPT_CHAT_MODELS:
+            prompt = [{'role': 'system', 'content': 'Given the list of questions, you need to rewrite them to remove the context dependency.'}]
+            for shot in shots:
+                prompt.append({'role': 'user', 'content': preprocess(shot['q_multiturn'])})
+                prompt.append({'role': 'assistant', 'content': preprocess(shot['q'])})
+            prompt.append({'role': 'user', 'content': preprocess(questions)})
+        elif gpt in GPT_COMPLETION_MODELS:
+            prompt = ''
+            pass
         return prompt
 
     def is_valid_shots(self, shots, args, request=None):

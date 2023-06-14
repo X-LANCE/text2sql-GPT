@@ -24,8 +24,10 @@ class Evaluator:
     def evaluate_with_official_interface(self, pred_filename, dataset, output_path, etype='all'):
         gold_filename = os.path.join(os.path.dirname(output_path), 'gold.sql')
         with open(gold_filename, 'w', encoding='utf-8') as tmp_gold:
-            for example in dataset:
-                tmp_gold.write(example['query'] + '\t' + example['db_id'] + '\n')
+            for i, example in enumerate(dataset):
+                if i > 0 and 'e_id' in dataset[i] and dataset[i]['e_id'] > dataset[i - 1]['e_id']:
+                    tmp_gold.write('\n')
+                tmp_gold.write(' '.join(example['query'].strip('\t ;').split()) + '\t' + example['db_id'] + '\n')
             tmp_gold.flush()
             of = open(output_path, 'w', encoding='utf-8')
             old_print, sys.stdout = sys.stdout, of
