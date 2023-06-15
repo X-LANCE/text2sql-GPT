@@ -8,7 +8,7 @@ def main_args():
     arg_parser.add_argument('--gpt', default='gpt-3.5-turbo', type=str, help='GPT model')
     arg_parser.add_argument('--seed', default=42, type=int, help='random seed')
     arg_parser.add_argument('--api_doc', action='store_true', help='write schema according to api doc')
-    arg_parser.add_argument('--pf', default='eoc', type=str, choices=['no', 'eoc', 'eot'], help='format of primary and foreign keys')
+    arg_parser.add_argument('--pf', default='eot', type=str, choices=['no', 'eoc', 'eot'], help='format of primary and foreign keys')
     arg_parser.add_argument('--content', default=3, type=int, help='number of database records')
     arg_parser.add_argument('--zero_shot', action='store_true', help='zero shot')
     arg_parser.add_argument('--labeled_shot', action='store_true', help='use labeled shots')
@@ -31,13 +31,14 @@ def main_args():
     arg_parser.add_argument('--hard_and_extra', action='store_true', help='only test hard and extra hard examples')
     arg_parser.add_argument('--speech_api', action='store_true', help='use speech api')
     args = arg_parser.parse_args()
-    assert (not args.api_doc) or args.pf == 'no'
     assert not (args.zero_shot and args.labeled_shot)
     assert not (args.cot and args.tot)
     args.device = 'cpu' if args.device < 0 else f'cuda:{args.device}'
     args.log_path = args.gpt
     args.log_path += '__seed_' + str(args.seed)
-    args.log_path += '__' + ('api_doc' if args.api_doc else (args.pf + '_pf'))
+    if args.api_doc:
+        args.log_path += '__api_doc'
+    args.log_path += '__' + args.pf + '_pf'
     args.log_path += '__content_' + str(args.content)
     args.log_path += '__' + ('zero' if args.zero_shot else 'few') + '_shot'
     if args.labeled_shot:

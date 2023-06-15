@@ -21,7 +21,7 @@ class PromptMaker:
             for c_num in range(args.content + 1):
                 for i in range(len(tabs)):
                     if args.api_doc:
-                        self.db_prompts[db_id][c_num] += f"# {tabs[i]}({', '.join(col[1] for col in cols if col[0] == i)})\n"
+                        self.db_prompts[db_id][c_num] += f"# {tabs[i]}({', '.join([col[1] for col in cols if col[0] == i])})\n"
                     else:
                         self.db_prompts[db_id][c_num] += f'create table {tabs[i]} (\n'
                         for j in range(len(cols)):
@@ -54,6 +54,9 @@ class PromptMaker:
                         for record in db_contents:
                             self.db_prompts[db_id][c_num] += '\t'.join([str(record[col[1]]) for col in cols if col[0] == i]) + '\n'
                         self.db_prompts[db_id][c_num] += '*/\n'
+                if args.api_doc and args.pf != 'no':
+                    self.db_prompts[db_id][c_num] += f"# primary keys = [{', '.join([tabs[cols[pk][0]] + '.' + cols[pk][1] for pk in db['primary_keys']])}]\n"
+                    self.db_prompts[db_id][c_num] += f"# foreign keys = [{', '.join([tabs[cols[fk[0]][0]] + '.' + cols[fk[0]][1] + ' = ' + tabs[cols[fk[1]][0]] + '.' + cols[fk[1]][1] for fk in db['foreign_keys']])}]\n"
                 self.db_prompts[db_id][c_num] = self.db_prompts[db_id][c_num][:-1]
 
     def get_prompt(self, args, db_id=None, question=None, shots=[], c_num=-1):
