@@ -1,6 +1,5 @@
 import json
 import openai
-import os
 import requests
 import time
 from util.constant import SPEECH_API_TOKEN
@@ -32,7 +31,6 @@ def get_response(prompt, args, max_tokens=150, temperature=0):
             except:
                 print('Retrying ...')
                 time.sleep(10)
-    openai.api_key = os.getenv('OPENAI_API_KEY')
     while 1:
         if isinstance(prompt, str):
             try:

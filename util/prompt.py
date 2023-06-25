@@ -5,7 +5,7 @@ import json
 import random
 import sqlite3
 from sentence_transformers import util
-from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, SET_OPS, TOT_CLAUSES
+from util.constant import GPT_CHAT_MODELS, GPT_COMPLETION_MODELS, MAX_LENS, SET_OPS, TOT_CLAUSES
 
 
 class PromptMaker:
@@ -239,8 +239,7 @@ class PromptMaker:
                     return False
         prompt = self.get_prompt_phase_1(args, shots=shots) if args.two_phase else self.get_prompt(args, shots=shots)
         prompt_len = len(prompt) if isinstance(prompt, str) else sum([len(message['content']) for message in prompt])
-        max_len = 15000 if args.gpt == 'code-davinci-002' else 7500
-        return prompt_len < max_len * len(shots) / (args.cluster_num + args.dynamic_num)
+        return prompt_len < MAX_LENS[args.gpt] * len(shots) / (args.cluster_num + args.dynamic_num)
 
     def get_static_shots(self, dataset, args, request=None):
         if args.zero_shot or args.cluster_num == 0:

@@ -126,14 +126,15 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 dynamic_shots = prompt_maker.get_dynamic_shots(encoding, train_dataset, args)
             shots = static_shots + dynamic_shots
         if args.cot:
-            cots[str(i)] = {'c_num': args.content + 1}
-            response = None
-            while response is None:
-                cots[str(i)]['c_num'] -= 1
-                response = get_response(prompt_maker.get_prompt(args, db_id, question, shots, cots[str(i)]['c_num']), args, max_tokens=750)
-            cots[str(i)]['cot'] = response
-            save_cached_json_file(cot_filename, cots)
-            pred_file.write(postprocess(response.split('\n')[-1], args, db_id) + '\n')
+            if str(i) not in cots:
+                cots[str(i)] = {'c_num': args.content + 1}
+                response = None
+                while response is None:
+                    cots[str(i)]['c_num'] -= 1
+                    response = get_response(prompt_maker.get_prompt(args, db_id, question, shots, cots[str(i)]['c_num']), args, max_tokens=750)
+                cots[str(i)]['cot'] = response
+                save_cached_json_file(cot_filename, cots)
+            pred_file.write(postprocess(cots[str(i)]['cot'], args, db_id) + '\n')
         elif args.tot:
             static_shots = prompt_maker.get_static_shots(train_dataset, args, 'iue')
             prev_results = [{'db_id': db_id, 'question': question}]
@@ -238,6 +239,9 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
             print(f'Correcting example {i} ...')
             if i < cached:
                 continue
+            if i > 0 and 'e_id' in dev_dataset[i] and dev_dataset[i]['e_id'] > dev_dataset[i - 1]['e_id']:
+                pred_file.write('\n')
+                pred_file.flush()
             db_id = example['db_id']
             query = example['query']
             question = example['question']
@@ -245,17 +249,17 @@ def decode(train_dataset, dev_dataset, args, etype='all'):
                 pred_file.write(query.strip('\t ;') + '\n')
                 pred_file.flush()
                 continue
-            if args.ref_shot:
-                response, c_num = None, args.content + 1
-                while response is None:
-                    c_num -= 1
-                    response = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i], ref_shots, c_num), args, max_tokens=750)
-                refs[str(i)] = response
-                sql = postprocess(response.split('\n')[-1], args, db_id)
-            else:
-                refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i]), args, max_tokens=750)
-                sql = postprocess(refs[str(i)], args, db_id)
-            save_cached_json_file(ref_filename, refs)
+            if str(i) not in refs:
+                if args.ref_shot:
+                    response, c_num = None, args.content + 1
+                    while response is None:
+                        c_num -= 1
+                        response = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i], ref_shots, c_num), args, max_tokens=750)
+                    refs[str(i)] = response
+                else:
+                    refs[str(i)] = get_response(prompt_maker.get_prompt_reflection(args, db_id, question, sqls[i]), args, max_tokens=750)
+                save_cached_json_file(ref_filename, refs)
+            sql = postprocess(refs[str(i)], args, db_id)
             if not isValidSQL(sql, os.path.join(Example.evaluator.db_dir, db_id, db_id + '.sqlite')):
                 sql = sqls[i]
             pred_file.write(sql + '\n')
