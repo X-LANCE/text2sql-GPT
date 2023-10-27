@@ -29,7 +29,6 @@ def main_args():
     arg_parser.add_argument('--oracle', action='store_true', help='given queries in the dev dataset')
     arg_parser.add_argument('--two_phase', action='store_true', help='use two phase method')
     arg_parser.add_argument('--hard_and_extra', action='store_true', help='only test hard and extra hard examples')
-    arg_parser.add_argument('--speech_api', action='store_true', help='use speech api')
     args = arg_parser.parse_args()
     assert not (args.zero_shot and args.labeled_shot)
     assert not (args.cot and args.tot)
@@ -102,6 +101,5 @@ def multiturn_args():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument('--dataset', default='sparc', type=str, help='dataset name')
     arg_parser.add_argument('--gpt', default='gpt-3.5-turbo', type=str, help='GPT model')
-    arg_parser.add_argument('--speech_api', action='store_true', help='use speech api')
     args = arg_parser.parse_args()
     return args
