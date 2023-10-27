@@ -614,7 +614,7 @@ def evaluate(gold, predict, db_dir, etype, kmaps, plug_value, keep_distinct, pro
                 else:
                     turn_scores['exec'].append(0)
                     print("EX fail")
-                    print("id: {}".format(idx))
+                    print("id: {}-{}".format(i, idx))
                     print("{} pred: {}".format(hardness, p_str))
                     print("{} gold: {}".format(hardness, g_str))
                     print("")
@@ -634,7 +634,7 @@ def evaluate(gold, predict, db_dir, etype, kmaps, plug_value, keep_distinct, pro
                     turn_scores['exact'].append(0)
                     if etype == "match" or (etype == "all" and turn_scores['exec'][-1] == 1):
                         print("EM fail")
-                        print("id: {}".format(idx))
+                        print("id: {}-{}".format(i, idx))
                         print("{} pred: {}".format(hardness, p_str))
                         print("{} gold: {}".format(hardness, g_str))
                         print("")

@@ -45,9 +45,7 @@ def postprocess(response, args, db_id=None):
     if args.gpt in GPT_CHAT_MODELS:
         start_idx = response.find('SELECT')
         if start_idx < 0:
-            start_idx = response.find('select')
-            if start_idx < 0:
-                return response
+            start_idx = max(response.find('select'), 0)
         original_sql = response[start_idx:]
         end_idx = original_sql.find('```')
         if end_idx >= 0:
