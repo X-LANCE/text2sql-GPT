@@ -14,7 +14,7 @@ def main_args():
     arg_parser.add_argument('--labeled_shot', action='store_true', help='use labeled shots')
     arg_parser.add_argument('--plm', default='text2vec-base-chinese', type=str, help='plm for preprocessing')
     arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size for preprocessing')
-    arg_parser.add_argument('--device', default=0, type=int, help='gpu id (-1 represents cpu)')
+    arg_parser.add_argument('--device', default=-1, type=int, help='gpu id (-1 represents cpu)')
     arg_parser.add_argument('--cluster_method', default='random', type=str, choices=['kmeans', 'agglomerative', 'random'], help='clustering method')
     arg_parser.add_argument('--cluster_num', default=2, type=int, help='number of clusters')
     arg_parser.add_argument('--dynamic_num', default=2, type=int, help='number of dynamic shots')
@@ -71,7 +71,7 @@ def cluster_args():
     arg_parser.add_argument('--dataset', default='spider', type=str, help='dataset name')
     arg_parser.add_argument('--plm', default='text2vec-base-chinese', type=str, help='plm for preprocessing')
     arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size for preprocessing')
-    arg_parser.add_argument('--device', default=0, type=int, help='gpu id (-1 represents cpu)')
+    arg_parser.add_argument('--device', default=-1, type=int, help='gpu id (-1 represents cpu)')
     arg_parser.add_argument('--method', default='kmeans', type=str, choices=['kmeans', 'agglomerative'], help='clustering method')
     arg_parser.add_argument('--cluster', default=3, type=int, help='number of clusters')
     arg_parser.add_argument('--encoding', default='question', type=str, choices=['question', 'query'], help='according to question or query encoding')
@@ -85,7 +85,7 @@ def cot_args():
     arg_parser.add_argument('--dataset', default='spider', type=str, help='dataset name')
     arg_parser.add_argument('--plm', default='text2vec-base-chinese', type=str, help='plm for preprocessing')
     arg_parser.add_argument('--batch_size', default=64, type=int, help='batch size for preprocessing')
-    arg_parser.add_argument('--device', default=0, type=int, help='gpu id (-1 represents cpu)')
+    arg_parser.add_argument('--device', default=-1, type=int, help='gpu id (-1 represents cpu)')
     args = arg_parser.parse_args()
     args.device = 'cpu' if args.device < 0 else f'cuda:{args.device}'
     return args
